@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:livreur_app/screens/splash_screen.dart';
 
 void main() {
-  testWidgets('SplashScreen displays Soukna Delivery and navigates to next screen', (
+  testWidgets('SplashScreen displays Dokan Delivery and navigates to next screen', (
     WidgetTester tester,
   ) async {
     const destinationKey = ValueKey('destination-screen');
@@ -21,7 +21,7 @@ void main() {
     );
 
     // Vérifie le logo et les textes de branding
-    expect(find.text('Soukna Delivery'), findsOneWidget);
+    expect(find.text('Dokan Delivery'), findsOneWidget);
     expect(find.text('Espace Livreur'), findsOneWidget);
     expect(find.text('Rapidité • Fiabilité • Sécurité'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -32,6 +32,6 @@ void main() {
     // Vérifie l'arrivée sur la page de destination
     expect(find.byKey(destinationKey), findsOneWidget);
     expect(find.text('Page de destination'), findsOneWidget);
-    expect(find.text('Soukna Delivery'), findsNothing);
+    expect(find.text('Dokan Delivery'), findsNothing);
   });
 }

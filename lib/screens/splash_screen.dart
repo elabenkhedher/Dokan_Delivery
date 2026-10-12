@@ -167,7 +167,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                             // Nom de l'application
                             const Text(
-                              'Soukna Delivery',
+                              'Dokan Delivery',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white,

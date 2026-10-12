@@ -95,7 +95,7 @@ class _LoginScreenState extends State<LoginScreen>
             ),
             const SizedBox(height: 20),
             const Text(
-              'Soukna Delivery',
+              'Dokan Delivery',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 26,
