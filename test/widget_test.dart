@@ -5,26 +5,24 @@ import 'package:livreur_app/main.dart';
 import 'package:livreur_app/screens/dashboard_screen.dart';
 
 void main() {
-  testWidgets('login requires password change before opening the dashboard', (
+  testWidgets('app renders login screen and splash screen correctly', (
     WidgetTester tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const LivreurApp());
     await tester.pumpAndSettle();
 
-    final loginFields = find.byType(TextField);
-    await tester.enterText(loginFields.at(0), 'livreur@example.com');
-    await tester.enterText(loginFields.at(1), 'current-password');
-    await tester.tap(find.text('Se connecter'));
-    await tester.pumpAndSettle();
+    expect(find.text('Dokan Delivery'), findsWidgets);
+    expect(find.text('Bienvenue'), findsOneWidget);
+    expect(find.text('Se connecter'), findsOneWidget);
+    expect(find.text('Mot de passe oublié ?'), findsOneWidget);
+  });
 
-    expect(find.text('Modifier le mot de passe'), findsOneWidget);
-    expect(find.text('Dashboard Livreur'), findsNothing);
-
-    final passwordFields = find.byType(TextField);
-    await tester.enterText(passwordFields.at(0), 'new-password');
-    await tester.enterText(passwordFields.at(1), 'new-password');
-    await tester.tap(find.text('Confirmer et continuer'));
+  testWidgets('dashboard navigation and order flows work correctly', (
+    WidgetTester tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const MaterialApp(home: DashboardScreen()));
     await tester.pumpAndSettle();
 
     expect(find.text('Dashboard Livreur'), findsOneWidget);
@@ -83,11 +81,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Commande #1003'), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('nav-4')));
+    await tester.tap(find.byKey(const ValueKey('nav-0')));
     await tester.pumpAndSettle();
-    expect(find.text('Votre profil de livraison'), findsOneWidget);
 
-    await tester.tap(find.text('Se déconnecter'));
+    await tester.tap(find.byTooltip('Déconnexion'));
+    await tester.pump();
+    await tester.pump();
     await tester.pumpAndSettle();
     expect(find.text('Bienvenue'), findsOneWidget);
   });

@@ -1,10 +1,15 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/auth_service.dart';
 import '../utils/page_transitions.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/auth_layout.dart';
 import '../widgets/password_field.dart';
 import '../widgets/primary_button.dart';
+import 'auth_gate.dart';
 import 'password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -61,18 +66,107 @@ class _LoginScreenState extends State<LoginScreen>
 
     setState(() => _isLoading = true);
 
-    // Simule un court délai de traitement
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      final authService = AuthService();
+      await authService.signIn(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
 
-    if (!mounted) return;
-    setState(() => _isLoading = false);
+      if (!mounted) return;
+      HapticFeedback.lightImpact();
 
-    HapticFeedback.lightImpact();
+      // Vérifier si l'utilisateur a déjà changé son mot de passe lors de sa 1ère connexion
+      final currentUser = authService.currentUser;
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+      final hasChangedPassword = currentUser != null &&
+          (prefs.getBool('first_password_changed_${currentUser.uid}') ?? false);
 
-    await Navigator.pushReplacement(
-      context,
-      SlideFadePageRoute(page: const PasswordScreen()),
-    );
+      if (!hasChangedPassword) {
+        // Premier login : redirection vers l'écran de modification du mot de passe
+        await Navigator.pushReplacement(
+          context,
+          SlideFadePageRoute(page: const PasswordScreen()),
+        );
+      } else {
+        // Connexions ultérieures : redirection directe vers le Dashboard
+        await Navigator.pushAndRemoveUntil(
+          context,
+          SlideFadePageRoute(page: const AuthGate()),
+          (route) => false,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      String errorMessage = 'Une erreur est survenue lors de la connexion.';
+      switch (e.code) {
+        case 'user-not-found':
+          errorMessage = 'Aucun utilisateur trouvé avec cet e-mail.';
+          break;
+        case 'wrong-password':
+          errorMessage = 'Mot de passe incorrect.';
+          break;
+        case 'invalid-email':
+          errorMessage = 'Adresse e-mail invalide.';
+          break;
+        case 'user-disabled':
+          errorMessage = 'Ce compte a été désactivé.';
+          break;
+        case 'too-many-requests':
+          errorMessage = 'Trop de tentatives. Veuillez réessayer plus tard.';
+          break;
+        case 'invalid-credential':
+          errorMessage =
+              'E-mail ou mot de passe incorrect. Veuillez vérifier vos identifiants.';
+          break;
+        default:
+          if (e.message != null && e.message!.isNotEmpty) {
+            errorMessage = e.message!;
+          }
+      }
+      AppSnackBar.showError(context, errorMessage);
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackBar.showError(
+        context,
+        'Erreur de connexion : ${e.toString()}',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      AppSnackBar.showError(
+        context,
+        'Veuillez saisir votre adresse e-mail pour réinitialiser votre mot de passe.',
+      );
+      _emailFocus.requestFocus();
+      return;
+    }
+
+    try {
+      await AuthService().sendPasswordResetEmail(email);
+      if (!mounted) return;
+      AppSnackBar.showSuccess(
+        context,
+        'Un e-mail de réinitialisation a été envoyé à $email.',
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      AppSnackBar.showError(
+        context,
+        e.message ?? 'Impossible d\'envoyer l\'e-mail de réinitialisation.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackBar.showError(context, 'Erreur : ${e.toString()}');
+    }
   }
 
   @override
@@ -164,7 +258,7 @@ class _LoginScreenState extends State<LoginScreen>
                   ),
                   const SizedBox(height: 16),
 
-                  // Mot de passe (widget réutilisable)
+                  // Mot de passe
                   PasswordField(
                     controller: _passwordController,
                     focusNode: _passwordFocus,
@@ -173,9 +267,23 @@ class _LoginScreenState extends State<LoginScreen>
                         ? 'Saisissez votre mot de passe.'
                         : null,
                   ),
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 8),
 
-                  // Bouton principal réutilisable
+                  // Mot de passe oublié ?
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _forgotPassword,
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                      ),
+                      child: const Text('Mot de passe oublié ?'),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Bouton principal
                   PrimaryButton(
                     label: 'Se connecter',
                     icon: Icons.login_rounded,

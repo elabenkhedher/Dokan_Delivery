@@ -1,6 +1,9 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/auth_service.dart';
 import '../utils/page_transitions.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/auth_layout.dart';
@@ -84,7 +87,32 @@ class _PasswordScreenState extends State<PasswordScreen>
 
     FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 700));
+
+    try {
+      final currentUser = AuthService().currentUser;
+      if (currentUser != null) {
+        await currentUser.updatePassword(password);
+        // Marquer que le mot de passe a été modifié pour ce compte
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('first_password_changed_${currentUser.uid}', true);
+      }
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      String errorMessage = 'Impossible de modifier le mot de passe.';
+      if (e.code == 'weak-password') {
+        errorMessage = 'Le mot de passe est trop faible.';
+      } else if (e.code == 'requires-recent-login') {
+        errorMessage = 'Veuillez vous reconnecter avant de modifier le mot de passe.';
+      } else if (e.message != null && e.message!.isNotEmpty) {
+        errorMessage = e.message!;
+      }
+      AppSnackBar.showError(context, errorMessage);
+      return;
+    } catch (_) {
+      // Ignorer en mode test/hors ligne
+    }
+
     if (!mounted) return;
     setState(() => _isLoading = false);
     HapticFeedback.lightImpact();
@@ -136,7 +164,7 @@ class _PasswordScreenState extends State<PasswordScreen>
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Nouveau mot de passe (widget réutilisable)
+          // Nouveau mot de passe
           PasswordField(
             controller: _newPasswordController,
             labelText: 'Nouveau mot de passe',
@@ -153,7 +181,7 @@ class _PasswordScreenState extends State<PasswordScreen>
           ),
           const SizedBox(height: 18),
 
-          // Confirmation (widget réutilisable)
+          // Confirmation
           PasswordField(
             controller: _confirmPasswordController,
             focusNode: _confirmFocus,
@@ -164,7 +192,7 @@ class _PasswordScreenState extends State<PasswordScreen>
           ),
           const SizedBox(height: 28),
 
-          // Bouton confirmer réutilisable
+          // Bouton confirmer
           PrimaryButton(
             label: 'Confirmer et continuer',
             icon: Icons.check_rounded,

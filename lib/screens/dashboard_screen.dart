@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/delivery_order.dart';
+import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../services/working_hours_service.dart';
 import '../utils/page_transitions.dart';
+import 'auth_gate.dart';
 import 'history_screen.dart';
 import 'home_screen.dart';
-import 'login_screen.dart';
 import 'order_details_screen.dart';
 import 'orders_screen.dart';
 import 'profile_screen.dart';
@@ -87,9 +88,11 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   Future<void> _logout() async {
     HapticFeedback.lightImpact();
+    await AuthService().signOut();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
-      SlideFadePageRoute(page: const LoginScreen()),
+      SlideFadePageRoute(page: const AuthGate()),
       (route) => false,
     );
   }

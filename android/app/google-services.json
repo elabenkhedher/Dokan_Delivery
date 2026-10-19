@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "247256040910",
+    "project_id": "ee-comeerce",
+    "storage_bucket": "ee-comeerce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247256040910:android:e495075383bab595a2979f",
+        "android_client_info": {
+          "package_name": "com.Dokan.Dokan_client"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBy1Q7uy34rT_bY3JI2oTg8EDDmFNgAL18"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247256040910:android:e7ccbd4e2e823680a2979f",
+        "android_client_info": {
+          "package_name": "com.example.admin"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBy1Q7uy34rT_bY3JI2oTg8EDDmFNgAL18"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:247256040910:android:ca3d366fa1a3991da2979f",
+        "android_client_info": {
+          "package_name": "com.example.livreur_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBy1Q7uy34rT_bY3JI2oTg8EDDmFNgAL18"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

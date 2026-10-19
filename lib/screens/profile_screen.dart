@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
-import 'login_screen.dart';
+import 'auth_gate.dart';
 
 typedef ProfilScreen = ProfileScreen;
 
@@ -26,9 +27,11 @@ class ProfileScreen extends StatelessWidget {
       onLogout!();
       return;
     }
+    await AuthService().signOut();
+    if (!context.mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
-      SlideFadePageRoute(page: const LoginScreen()),
+      SlideFadePageRoute(page: const AuthGate()),
       (route) => false,
     );
   }
@@ -37,10 +40,11 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final service = orderService ?? OrderService();
+    final currentUser = AuthService().currentUser;
 
     final content = ListView(
       key: const ValueKey('profile-page'),
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 100),
       children: [
         // Avatar
         Card(
@@ -69,11 +73,13 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('Espace livreur',
-                    style: Theme.of(context).textTheme.headlineSmall),
+                Text(
+                  currentUser?.displayName ?? 'Espace livreur',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
                 const SizedBox(height: 2),
                 Text(
-                  'Votre profil de livraison',
+                  currentUser?.email ?? 'Votre profil de livraison',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: colorScheme.onSurfaceVariant,
                       ),
@@ -88,6 +94,14 @@ class ProfileScreen extends StatelessWidget {
         Card(
           child: Column(
             children: [
+              if (currentUser?.email != null) ...[
+                ListTile(
+                  leading: const Icon(Icons.email_outlined),
+                  title: const Text('Adresse e-mail'),
+                  subtitle: Text(currentUser!.email!),
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+              ],
               const ListTile(
                 leading: Icon(Icons.badge_outlined),
                 title: Text('Rôle'),
