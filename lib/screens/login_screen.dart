@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/auth/firebase_role_service.dart';
+import '../core/auth/role_denied_exception.dart';
+import '../core/auth/user_role.dart';
 import '../services/auth_service.dart';
 import '../utils/page_transitions.dart';
 import '../utils/snackbar_helper.dart';
@@ -68,9 +71,12 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final authService = AuthService();
-      await authService.signIn(
+      // Connexion Firebase + vérification du rôle livreur :
+      // le compte sans rôle « deliverer » est refusé et déconnecté.
+      await FirebaseRoleService().signInWithRole(
         email: _emailController.text,
         password: _passwordController.text,
+        requiredRole: UserRole.deliverer,
       );
 
       if (!mounted) return;
@@ -126,6 +132,9 @@ class _LoginScreenState extends State<LoginScreen>
           }
       }
       AppSnackBar.showError(context, errorMessage);
+    } on RoleDeniedException catch (e) {
+      if (!mounted) return;
+      AppSnackBar.showError(context, e.toString());
     } catch (e) {
       if (!mounted) return;
       AppSnackBar.showError(
