@@ -1,8 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/auth/firebase_role_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
@@ -10,7 +10,7 @@ import '../utils/snackbar_helper.dart';
 import '../widgets/hero_delivery_car.dart';
 import '../widgets/password_field.dart';
 import '../widgets/primary_button.dart';
-import 'dashboard_screen.dart';
+import 'auth_gate.dart';
 
 class PasswordScreen extends StatefulWidget {
   const PasswordScreen({super.key});
@@ -37,10 +37,7 @@ class _PasswordScreenState extends State<PasswordScreen>
   @override
   void initState() {
     super.initState();
-    _animCtrl = AnimationController(
-      vsync: this,
-      duration: AppDurations.hero,
-    );
+    _animCtrl = AnimationController(vsync: this, duration: AppDurations.hero);
     _fadeIn = CurvedAnimation(parent: _animCtrl, curve: AppCurves.smooth);
     _slideIn = Tween<Offset>(
       begin: const Offset(0, 0.05),
@@ -86,10 +83,7 @@ class _PasswordScreenState extends State<PasswordScreen>
       return;
     }
     if (password != confirmation) {
-      AppSnackBar.showError(
-        context,
-        'Les mots de passe ne correspondent pas.',
-      );
+      AppSnackBar.showError(context, 'Les mots de passe ne correspondent pas.');
       return;
     }
 
@@ -98,11 +92,11 @@ class _PasswordScreenState extends State<PasswordScreen>
 
     try {
       final currentUser = AuthService().currentUser;
-      if (currentUser != null) {
-        await currentUser.updatePassword(password);
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('first_password_changed_${currentUser.uid}', true);
+      if (currentUser == null) {
+        throw StateError('Aucun utilisateur connecté.');
       }
+      await currentUser.updatePassword(password);
+      await FirebaseRoleService().markPasswordChanged(currentUser);
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -117,17 +111,24 @@ class _PasswordScreenState extends State<PasswordScreen>
       }
       AppSnackBar.showError(context, errorMessage);
       return;
-    } catch (_) {
-      // Ignorer en mode test/hors ligne
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      AppSnackBar.showError(
+        context,
+        'Le mot de passe a peut-être été modifié, mais la validation du compte a échoué. Réessayez : ${e.toString()}',
+      );
+      return;
     }
 
     if (!mounted) return;
     setState(() => _isLoading = false);
     HapticFeedback.lightImpact();
 
-    await Navigator.pushReplacement(
+    await Navigator.pushAndRemoveUntil(
       context,
-      SlideFadePageRoute(page: const DashboardScreen()),
+      SlideFadePageRoute(page: const AuthGate()),
+      (route) => false,
     );
   }
 
@@ -207,8 +208,9 @@ class _PasswordScreenState extends State<PasswordScreen>
                                 ),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withValues(alpha: 0.16),
-                                  borderRadius:
-                                      BorderRadius.circular(AppRadius.pill),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.pill,
+                                  ),
                                 ),
                                 child: const Text(
                                   'Sécurité du compte • Livreur',
@@ -243,19 +245,17 @@ class _PasswordScreenState extends State<PasswordScreen>
                     'Modifier le mot de passe',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Pour votre première connexion, choisissez un nouveau mot de passe sécurisé.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: isDark
-                              ? AppColors.darkMuted
-                              : AppColors.mutedText,
-                        ),
+                      color: isDark ? AppColors.darkMuted : AppColors.mutedText,
+                    ),
                   ),
 
                   const SizedBox(height: 26),
@@ -319,12 +319,39 @@ class _PasswordScreenState extends State<PasswordScreen>
                       Text(
                         'Vos identifiants sont chiffrés et sécurisés',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? AppColors.darkMuted
-                                  : AppColors.mutedText,
-                            ),
+                          color: isDark
+                              ? AppColors.darkMuted
+                              : AppColors.mutedText,
+                        ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: TextButton.icon(
+                      onPressed: () async {
+                        await AuthService().signOut();
+                        if (context.mounted) {
+                          Navigator.pushAndRemoveUntil(
+                            context,
+                            SlideFadePageRoute(page: const AuthGate()),
+                            (route) => false,
+                          );
+                        }
+                      },
+                      icon: Icon(
+                        Icons.logout_rounded,
+                        size: 16,
+                        color: isDark ? AppColors.darkMuted : AppColors.mutedText,
+                      ),
+                      label: Text(
+                        'Se déconnecter',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? AppColors.darkMuted : AppColors.mutedText,
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -345,11 +372,7 @@ class _StepIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [
-        _dot(0, '1'),
-        _line(0),
-        _dot(1, '2'),
-      ],
+      children: [_dot(0, '1'), _line(0), _dot(1, '2')],
     );
   }
 
@@ -444,10 +467,8 @@ class _StrengthBar extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: i < strength
                       ? _color
-                      : Theme.of(context)
-                          .colorScheme
-                          .outline
-                          .withValues(alpha: 0.25),
+                      : Theme.of(context).colorScheme.outline
+                            .withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
               ),
@@ -500,7 +521,7 @@ class _RequirementsList extends StatelessWidget {
       ('Un chiffre', password.contains(RegExp(r'[0-9]'))),
       (
         'Un caractère spécial (!@#...\$)',
-        password.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]'))
+        password.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>]')),
       ),
     ];
 
@@ -530,9 +551,9 @@ class _RequirementsList extends StatelessWidget {
               Text(
                 'Critères du mot de passe',
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: isDark ? AppColors.darkText : AppColors.text,
-                    ),
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? AppColors.darkText : AppColors.text,
+                ),
               ),
             ],
           ),
@@ -557,8 +578,8 @@ class _RequirementsList extends StatelessWidget {
                           color: r.$2
                               ? AppColors.success
                               : (isDark
-                                  ? AppColors.darkBorder
-                                  : AppColors.border),
+                                    ? AppColors.darkBorder
+                                    : AppColors.border),
                           width: 1.5,
                         ),
                       ),
@@ -579,8 +600,8 @@ class _RequirementsList extends StatelessWidget {
                       color: r.$2
                           ? AppColors.success
                           : (isDark
-                              ? AppColors.darkMuted
-                              : AppColors.mutedText),
+                                ? AppColors.darkMuted
+                                : AppColors.mutedText),
                       fontWeight: r.$2 ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),

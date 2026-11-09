@@ -28,12 +28,11 @@ class StatusBreakdownCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surfaceColor = isDark ? AppColors.darkSurface : AppColors.surface;
 
-    final total = deliveredCount + inProgressCount + awaitingCount + refusedCount;
+    final total = deliveredCount + inProgressCount + refusedCount;
 
     // Calcul des pourcentages
     final pDelivered = total > 0 ? deliveredCount / total : 0.0;
     final pInProgress = total > 0 ? inProgressCount / total : 0.0;
-    final pAwaiting = total > 0 ? awaitingCount / total : 0.0;
     final pRefused = total > 0 ? refusedCount / total : 0.0;
 
     final statuses = [
@@ -53,22 +52,14 @@ class StatusBreakdownCard extends StatelessWidget {
         color: AppColors.accent,
         icon: Icons.directions_car_rounded,
       ),
-      _StatusItem(
-        label: DeliveryOrder.awaitingPickup,
-        filterKey: 'À récupérer',
-        count: awaitingCount,
-        percent: (pAwaiting * 100).round(),
-        color: AppColors.primary,
-        icon: Icons.pending_actions_rounded,
-      ),
       if (refusedCount > 0)
         _StatusItem(
-          label: DeliveryOrder.refused,
-          filterKey: 'Refusées',
+          label: 'Échec / Retour',
+          filterKey: 'Échecs',
           count: refusedCount,
           percent: (pRefused * 100).round(),
           color: AppColors.error,
-          icon: Icons.cancel_outlined,
+          icon: Icons.assignment_return_rounded,
         ),
     ];
 
@@ -175,11 +166,6 @@ class StatusBreakdownCard extends StatelessWidget {
                           Expanded(
                             flex: (pInProgress * 1000).toInt(),
                             child: Container(color: AppColors.accent),
-                          ),
-                        if (pAwaiting > 0)
-                          Expanded(
-                            flex: (pAwaiting * 1000).toInt(),
-                            child: Container(color: AppColors.primary),
                           ),
                         if (pRefused > 0)
                           Expanded(

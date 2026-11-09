@@ -12,8 +12,8 @@ class RoleDeniedException implements Exception {
   @override
   String toString() {
     if (actual == null) {
-      return "Ce compte n'a pas encore reçu de rôle. Contactez un administrateur.";
+      return "Accès refusé : ce compte n'a pas le rôle « livreur » dans la collection users de Firestore.";
     }
-    return "Rôle « ${actual!.role} » insuffisant : cette app est réservée au rôle « ${expected.role} ».";
+    return "Accès refusé : rôle « ${actual!.role} » non autorisé. Cette application est exclusivement réservée aux livreurs (rôle « livreur »).";
   }
 }

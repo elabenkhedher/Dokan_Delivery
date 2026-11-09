@@ -1,5 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'notification_service.dart';
+
 class AuthService {
   final FirebaseAuth? _customAuth;
 
@@ -53,7 +55,15 @@ class AuthService {
   }
 
   // ── 4. Sign Out ────────────────────────────────────────────────────────────
+  /// Retire d'abord le token FCM de Firestore pour que l'ancien téléphone
+  /// ne reçoive plus les alertes, puis déconnecte l'utilisateur.
   Future<void> signOut() async {
+    try {
+      // Retirer le token FCM avant la déconnexion (uid encore disponible)
+      await NotificationService.removeToken();
+    } catch (_) {
+      // Ne jamais bloquer la déconnexion si les notifs échouent
+    }
     try {
       await _auth.signOut();
     } catch (_) {}

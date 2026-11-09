@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/delivery_order.dart';
+import '../services/deliverer_location_service.dart';
 import '../services/order_service.dart';
+import 'navigation_screen.dart';
 import '../services/working_hours_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
@@ -45,62 +48,362 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     super.dispose();
   }
 
-  void _advanceStatus() {
+  Future<void> _advanceStatus() async {
     HapticFeedback.lightImpact();
-    late final String status;
     try {
-      status = widget.orderService.advanceStatus(widget.order);
-    } on StateError catch (error) {
-      AppSnackBar.showError(context, error.message);
+      await widget.orderService.marquerLivree(widget.order);
+    } catch (error) {
+      if (mounted) {
+        AppSnackBar.showError(context, '$error');
+      }
       return;
     }
-    setState(() {});
-    AppSnackBar.showSuccess(context, 'Nouveau statut : $status');
+
+    // Synchronisation du suivi GPS temps réel
+    DelivererLocationService().updateCurrentOrder(null);
+
+    if (mounted) {
+      setState(() {});
+      AppSnackBar.showSuccess(
+        context,
+        'Commande #${widget.order.displayNumber.isNotEmpty ? widget.order.displayNumber : widget.order.id} livrée avec succès !',
+      );
+    }
   }
 
-  Future<void> _refuseOrder() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-        ),
-        title: const Text(
-          'Refuser cette commande ?',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
-        content: const Text(
-          'Cette décision est définitive et la commande sera '
-          'ajoutée à votre historique.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmer le refus'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    try {
-      widget.orderService.refuseOrder(widget.order);
-    } on StateError catch (error) {
-      AppSnackBar.showError(context, error.message);
+  Future<void> _openNavigation(String address) async {
+    final cleanAddress = address.trim();
+    if (cleanAddress.isEmpty || cleanAddress == 'Adresse non spécifiée') {
+      AppSnackBar.showError(
+        context,
+        'Adresse de livraison non spécifiée pour la navigation.',
+      );
       return;
     }
-    setState(() {});
-    AppSnackBar.showSuccess(context, 'Commande refusée.');
+
+    // Lance directement l'écran de guidage GPS intégré à l'application
+    final delivered = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NavigationScreen(
+          order: widget.order,
+          destination: widget.order.destinationLatLng,
+          vehicleInfo: DelivererLocationService().vehicleInfo,
+        ),
+      ),
+    );
+
+    if (delivered == true && mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _openExternalMaps(String address) async {
+    final cleanAddress = address.trim();
+    final encoded = Uri.encodeComponent(cleanAddress);
+    final googleMapsUrl =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$encoded');
+
+    try {
+      final launched =
+          await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(googleMapsUrl);
+      }
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: cleanAddress));
+      if (mounted) {
+        AppSnackBar.showSuccess(
+          context,
+          'Adresse copiée dans le presse-papier : $cleanAddress',
+        );
+      }
+    }
+  }
+
+  Future<void> _makePhoneCall(String phone) async {
+    final cleanPhone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleanPhone.isEmpty) {
+      AppSnackBar.showError(context, 'Numéro de téléphone non renseigné ou invalide.');
+      return;
+    }
+    final Uri uri = Uri(scheme: 'tel', path: cleanPhone);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: phone));
+      if (mounted) {
+        AppSnackBar.showSuccess(
+          context,
+          'Impossible d\'ouvrir l\'application d\'appel. Numéro copié : $phone',
+        );
+      }
+    }
+  }
+
+  Future<void> _sendSms(String phone) async {
+    final cleanPhone = phone.replaceAll(RegExp(r'[^0-9+]'), '');
+    if (cleanPhone.isEmpty) {
+      AppSnackBar.showError(context, 'Numéro de téléphone non renseigné ou invalide.');
+      return;
+    }
+    final Uri uri = Uri(scheme: 'sms', path: cleanPhone);
+    try {
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched) {
+        await launchUrl(uri);
+      }
+    } catch (_) {
+      await Clipboard.setData(ClipboardData(text: phone));
+      if (mounted) {
+        AppSnackBar.showSuccess(
+          context,
+          'Impossible d\'ouvrir les SMS. Numéro copié : $phone',
+        );
+      }
+    }
+  }
+
+  void _showContactOptions(String phone, String customerName) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Contacter $customerName',
+                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                phone,
+                style: const TextStyle(color: AppColors.mutedText, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 18),
+              ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.successSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.phone_rounded, color: AppColors.success, size: 22),
+                ),
+                title: const Text('Appeler le client', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Lancer un appel téléphonique direct'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _makePhoneCall(phone);
+                },
+              ),
+              const SizedBox(height: 6),
+              ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.primarySoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.sms_rounded, color: AppColors.primary, size: 22),
+                ),
+                title: const Text('Envoyer un SMS', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Ouvrir l\'application de messagerie'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _sendSms(phone);
+                },
+              ),
+              const SizedBox(height: 6),
+              ListTile(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                  ),
+                  child: const Icon(Icons.copy_rounded, color: AppColors.mutedText, size: 20),
+                ),
+                title: const Text('Copier le numéro', style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Copier dans le presse-papier'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Clipboard.setData(ClipboardData(text: phone));
+                  AppSnackBar.showSuccess(context, 'Numéro copié');
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _declareDeliveryFailure() async {
+    final reasons = [
+      'Client injoignable (ne répond pas)',
+      'Adresse introuvable ou incorrecte',
+      'Client absent du domicile / lieu convenu',
+      'Colis refusé par le client',
+      'Autre motif...',
+    ];
+    String selectedReason = reasons[0];
+    final customController = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.report_problem_rounded,
+                    color: Theme.of(context).colorScheme.error,
+                    size: 24,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Échec de livraison',
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Indiquez le motif de non-livraison :',
+                    style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  ...reasons.map((r) => RadioListTile<String>(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(r, style: const TextStyle(fontSize: 14)),
+                        value: r,
+                        // ignore: deprecated_member_use
+                        groupValue: selectedReason,
+                        activeColor: Theme.of(context).colorScheme.error,
+                        // ignore: deprecated_member_use
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() => selectedReason = val);
+                          }
+                        },
+                      )),
+                  if (selectedReason == 'Autre motif...') ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: customController,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Précisez la raison...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, null),
+                child: const Text('Annuler'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                ),
+                onPressed: () {
+                  final reason = selectedReason == 'Autre motif...' &&
+                          customController.text.trim().isNotEmpty
+                      ? customController.text.trim()
+                      : selectedReason;
+                  Navigator.pop(ctx, reason);
+                },
+                child: const Text('Confirmer l\'échec'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (result != null && mounted) {
+      try {
+        await widget.orderService.marquerEchecCommande(widget.order, result);
+        DelivererLocationService().updateCurrentOrder(null);
+        if (!mounted) return;
+        setState(() {});
+        AppSnackBar.showError(
+          context,
+          'Échec de livraison enregistré : $result',
+        );
+      } catch (e) {
+        if (!mounted) return;
+        AppSnackBar.showError(context, 'Erreur : $e');
+      }
+    }
   }
 
   @override
@@ -132,7 +435,83 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
           children: [
             // ── Bannière statut ──────────────────────────────
             _StatusBanner(order: order),
-            const SizedBox(height: 22),
+            const SizedBox(height: 16),
+
+            // ── Raccourci Navigation GPS en cours ─────────────
+            if (order.isInProgress) ...[
+              Card(
+                elevation: 0,
+                color: AppColors.primarySoft,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  side: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    width: 1.2,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                        ),
+                        child: const Icon(
+                          Icons.navigation_rounded,
+                          color: Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Navigation GPS en direct',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13.5,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Position temps réel partagée',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: () => _openNavigation(order.address),
+                        icon: const Icon(Icons.turn_right_rounded, size: 16),
+                        label: const Text('Naviguer'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(AppRadius.sm),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ] else ...[
+              const SizedBox(height: 6),
+            ],
 
             // ── Infos client ────────────────────────────────
             const _SectionTitle(title: 'Informations client'),
@@ -158,15 +537,30 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                   const Divider(height: 1, indent: 16, endIndent: 16),
                   _InfoRow(
                     icon: Icons.location_on_outlined,
-                    label: 'Adresse de livraison',
+                    label: 'Adresse de livraison (Appuyez pour naviguer)',
                     value: order.address,
+                    isAddress: true,
+                    onNavigate: () => _openNavigation(order.address),
+                    onExternalMaps: () => _openExternalMaps(order.address),
+                    onCopy: () {
+                      Clipboard.setData(ClipboardData(text: order.address));
+                      AppSnackBar.showSuccess(context, 'Adresse copiée');
+                    },
+                    onTap: () => _openNavigation(order.address),
                   ),
                   const Divider(height: 1, indent: 16, endIndent: 16),
                   _InfoRow(
                     icon: Icons.phone_outlined,
-                    label: 'Téléphone',
+                    label: 'Téléphone (Appuyez pour contacter)',
                     value: order.phone,
                     isPhone: true,
+                    onCall: () => _makePhoneCall(order.phone),
+                    onSms: () => _sendSms(order.phone),
+                    onCopy: () {
+                      Clipboard.setData(ClipboardData(text: order.phone));
+                      AppSnackBar.showSuccess(context, 'Numéro copié');
+                    },
+                    onTap: () => _showContactOptions(order.phone, order.customerName),
                   ),
                   const Divider(height: 1, indent: 16, endIndent: 16),
                   _InfoRow(
@@ -175,10 +569,171 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
                     value: '${order.total.toStringAsFixed(3)} TND',
                     isAmount: true,
                   ),
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _InfoRow(
+                    icon: Icons.scale_rounded,
+                    label: 'Poids du colis (charge)',
+                    value: '${order.totalPoids % 1 == 0 ? order.totalPoids.toInt() : order.totalPoids.toStringAsFixed(1)} kg',
+                  ),
                 ],
               ),
             ),
+            if (order.items.isNotEmpty) ...[
+              const SizedBox(height: 22),
+              _SectionTitle(title: 'Articles commandés (${order.items.length})'),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  side: BorderSide(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .outline
+                        .withValues(alpha: 0.5),
+                  ),
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: order.items.length,
+                  separatorBuilder: (context, index) =>
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                  itemBuilder: (context, idx) {
+                    final item = order.items[idx];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      leading: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppColors.primarySoft,
+                          borderRadius: BorderRadius.circular(AppRadius.sm),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '${item.quantity}x',
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        item.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: item.poids > 0
+                          ? Text(
+                              'Poids : ${item.poids % 1 == 0 ? item.poids.toInt() : item.poids.toStringAsFixed(1)} kg/u (Total : ${item.totalPoidsLigne.toStringAsFixed(1)} kg)',
+                              style: const TextStyle(fontSize: 12),
+                            )
+                          : null,
+                      trailing: item.price > 0
+                          ? Text(
+                              '${(item.price * item.quantity).toStringAsFixed(3)} DT',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                              ),
+                            )
+                          : null,
+                    );
+                  },
+                ),
+              ),
+            ],
             const SizedBox(height: 22),
+
+            // ── Rapport d'échec / refus ───────────────────────
+            if (isRefused) ...[
+              const _SectionTitle(title: 'Rapport d\'incident'),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                color: Theme.of(context).colorScheme.errorContainer.withValues(alpha: 0.35),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  side: BorderSide(
+                    color: Theme.of(context).colorScheme.error.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.report_problem_rounded,
+                            color: Theme.of(context).colorScheme.error,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Échec de livraison (Retour stock)',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: Theme.of(context).colorScheme.error,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (order.motifEchec != null && order.motifEchec!.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Motif enregistré :',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.mutedText,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          order.motifEchec!,
+                          style: const TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                      if (order.failedAt != null) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.schedule_rounded,
+                              size: 14,
+                              color: AppColors.mutedText,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Enregistré le ${order.failedAt!.day.toString().padLeft(2, '0')}/${order.failedAt!.month.toString().padLeft(2, '0')}/${order.failedAt!.year} à ${order.failedAt!.hour.toString().padLeft(2, '0')}:${order.failedAt!.minute.toString().padLeft(2, '0')}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.mutedText,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+            ],
 
             // ── Progression de la livraison ──────────────────
             if (!isRefused) ...[
@@ -206,13 +761,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
               const SizedBox(height: 22),
             ],
 
-            // ── Suggestion d'horaires ─────────────────────────
-            if (order.status == DeliveryOrder.awaitingPickup) ...[
-              _WorkingHoursSuggestion(
-                workingHoursService: widget.workingHoursService,
-              ),
-              const SizedBox(height: 16),
-            ],
           ],
         ),
       ),
@@ -221,7 +769,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
         isDelivered: isDelivered,
         isRefused: isRefused,
         onAdvance: _advanceStatus,
-        onRefuse: _refuseOrder,
+        onDeclareFailure: _declareDeliveryFailure,
       ),
     );
   }
@@ -390,20 +938,34 @@ class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
   final bool isPhone;
+  final bool isAddress;
   final bool isAmount;
+  final VoidCallback? onCall;
+  final VoidCallback? onSms;
+  final VoidCallback? onCopy;
+  final VoidCallback? onNavigate;
+  final VoidCallback? onExternalMaps;
+  final VoidCallback? onTap;
 
   const _InfoRow({
     required this.icon,
     required this.label,
     required this.value,
     this.isPhone = false,
+    this.isAddress = false,
     this.isAmount = false,
+    this.onCall,
+    this.onSms,
+    this.onCopy,
+    this.onNavigate,
+    this.onExternalMaps,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-
     return ListTile(
+      onTap: onTap,
       leading: Container(
         width: 38,
         height: 38,
@@ -428,75 +990,65 @@ class _InfoRow extends StatelessWidget {
             ),
       ),
       trailing: isPhone
-          ? IconButton(
-              tooltip: 'Copier le numéro',
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: value));
-                AppSnackBar.showSuccess(context, 'Numéro copié');
-              },
-              icon: const Icon(Icons.copy_rounded, size: 18),
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onCall != null)
+                  IconButton(
+                    tooltip: 'Appeler',
+                    icon: const Icon(Icons.phone_rounded, color: AppColors.success, size: 20),
+                    onPressed: onCall,
+                  ),
+                if (onSms != null)
+                  IconButton(
+                    tooltip: 'Envoyer SMS',
+                    icon: const Icon(Icons.sms_rounded, color: AppColors.primary, size: 20),
+                    onPressed: onSms,
+                  ),
+                IconButton(
+                  tooltip: 'Copier le numéro',
+                  onPressed: onCopy ??
+                      () {
+                        Clipboard.setData(ClipboardData(text: value));
+                        AppSnackBar.showSuccess(context, 'Numéro copié');
+                      },
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                ),
+              ],
             )
-          : null,
+          : (isAddress
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (onNavigate != null)
+                      IconButton.filledTonal(
+                        tooltip: 'Guidage GPS dans l\'app',
+                        style: IconButton.styleFrom(
+                          backgroundColor: AppColors.primarySoft,
+                          foregroundColor: AppColors.primary,
+                        ),
+                        icon: const Icon(Icons.navigation_rounded, size: 20),
+                        onPressed: onNavigate,
+                      ),
+                    if (onExternalMaps != null)
+                      IconButton(
+                        tooltip: 'Google Maps externe',
+                        icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                        onPressed: onExternalMaps,
+                      ),
+                    IconButton(
+                      tooltip: 'Copier l\'adresse',
+                      onPressed: onCopy ??
+                          () {
+                            Clipboard.setData(ClipboardData(text: value));
+                            AppSnackBar.showSuccess(context, 'Adresse copiée');
+                          },
+                      icon: const Icon(Icons.copy_rounded, size: 18),
+                    ),
+                  ],
+                )
+              : null),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    );
-  }
-}
-
-// ── Suggestion horaires ────────────────────────────────────────
-class _WorkingHoursSuggestion extends StatelessWidget {
-  final WorkingHoursService workingHoursService;
-  const _WorkingHoursSuggestion({required this.workingHoursService});
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isLoaded = workingHoursService.isLoaded;
-    final isWorking =
-        isLoaded && workingHoursService.isWorkingAt(DateTime.now());
-
-    final color = !isLoaded
-        ? colorScheme.onSurfaceVariant
-        : isWorking
-            ? AppColors.primary
-            : colorScheme.error;
-
-    return Card(
-      elevation: 0,
-      color: !isLoaded
-          ? colorScheme.surfaceContainerHighest
-          : isWorking
-              ? AppColors.primarySoft
-              : colorScheme.errorContainer,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(color: color.withValues(alpha: 0.3)),
-      ),
-      child: ListTile(
-        leading: Icon(
-          !isLoaded
-              ? Icons.schedule_outlined
-              : isWorking
-                  ? Icons.schedule_rounded
-                  : Icons.event_busy_rounded,
-          color: color,
-        ),
-        title: Text(
-          !isLoaded
-              ? 'Suggestion indisponible'
-              : isWorking
-                  ? '💡 Suggestion : accepter'
-                  : '⚠ Suggestion : refuser',
-          style: TextStyle(fontWeight: FontWeight.w700, color: color),
-        ),
-        subtitle: Text(
-          !isLoaded
-              ? 'Les horaires ne sont pas disponibles.'
-              : isWorking
-                  ? 'Vous êtes dans vos horaires. Vous restez libre de votre décision.'
-                  : 'Vous êtes hors de vos horaires. Vous restez libre de votre décision.',
-          style: const TextStyle(fontSize: 12.5),
-        ),
-      ),
     );
   }
 }
@@ -524,14 +1076,14 @@ class _BottomActions extends StatelessWidget {
   final bool isDelivered;
   final bool isRefused;
   final VoidCallback onAdvance;
-  final VoidCallback onRefuse;
+  final VoidCallback onDeclareFailure;
 
   const _BottomActions({
     required this.order,
     required this.isDelivered,
     required this.isRefused,
     required this.onAdvance,
-    required this.onRefuse,
+    required this.onDeclareFailure,
   });
 
   @override
@@ -542,17 +1094,23 @@ class _BottomActions extends StatelessWidget {
     Widget content;
     if (isDelivered || isRefused) {
       content = Card(
-        color: isDelivered ? AppColors.primarySoft : colorScheme.errorContainer,
+        color: isDelivered
+            ? AppColors.primarySoft
+            : colorScheme.errorContainer.withValues(alpha: 0.5),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
         child: ListTile(
           leading: Icon(
-            isDelivered ? Icons.check_circle_rounded : Icons.block_rounded,
+            isDelivered
+                ? Icons.check_circle_rounded
+                : Icons.assignment_return_rounded,
             color: isDelivered ? AppColors.primary : colorScheme.error,
           ),
           title: Text(
-            isDelivered ? 'Commande terminée' : 'Commande refusée',
+            isDelivered
+                ? 'Commande livrée avec succès'
+                : 'Échec de livraison (Retour dépôt)',
             style: TextStyle(
               fontWeight: FontWeight.w700,
               color: isDelivered ? AppColors.primary : colorScheme.error,
@@ -561,23 +1119,9 @@ class _BottomActions extends StatelessWidget {
           subtitle: Text(
             isDelivered
                 ? 'Cette livraison est définitivement terminée.'
-                : 'Cette commande a été refusée définitivement.',
-          ),
-        ),
-      );
-    } else if (order.isInProgress) {
-      content = SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          key: const ValueKey('advance-order-status'),
-          onPressed: onAdvance,
-          icon: const Icon(Icons.task_alt_rounded),
-          label: const Text('Marquer comme livrée'),
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size(0, 54),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
+                : (order.motifEchec != null && order.motifEchec!.isNotEmpty
+                    ? 'Motif : ${order.motifEchec}'
+                    : 'Cette commande est déclarée en échec de livraison (retour au dépôt central).'),
           ),
         ),
       );
@@ -587,10 +1131,10 @@ class _BottomActions extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ElevatedButton.icon(
-            key: const ValueKey('accept-order'),
+            key: const ValueKey('advance-order-status'),
             onPressed: onAdvance,
-            icon: const Icon(Icons.handshake_outlined),
-            label: const Text('Accepter la commande'),
+            icon: const Icon(Icons.task_alt_rounded),
+            label: const Text('Marquer comme livrée'),
             style: ElevatedButton.styleFrom(
               minimumSize: const Size(0, 54),
               shape: RoundedRectangleBorder(
@@ -600,10 +1144,10 @@ class _BottomActions extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
-            key: const ValueKey('refuse-order'),
-            onPressed: onRefuse,
-            icon: const Icon(Icons.block_outlined),
-            label: const Text('Refuser la commande'),
+            key: const ValueKey('declare-failure-btn'),
+            onPressed: onDeclareFailure,
+            icon: const Icon(Icons.report_problem_outlined),
+            label: const Text('Déclarer un échec de livraison'),
             style: OutlinedButton.styleFrom(
               foregroundColor: colorScheme.error,
               side: BorderSide(color: colorScheme.error, width: 1.5),

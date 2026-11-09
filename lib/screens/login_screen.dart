@@ -1,7 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/auth/firebase_role_service.dart';
 import '../core/auth/role_denied_exception.dart';
@@ -41,10 +40,7 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
-    _animCtrl = AnimationController(
-      vsync: this,
-      duration: AppDurations.hero,
-    );
+    _animCtrl = AnimationController(vsync: this, duration: AppDurations.hero);
     _fadeIn = CurvedAnimation(parent: _animCtrl, curve: AppCurves.smooth);
     _slideIn = Tween<Offset>(
       begin: const Offset(0, 0.05),
@@ -72,32 +68,35 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _isLoading = true);
 
     try {
-      final authService = AuthService();
-      // Connexion Firebase + vérification du rôle livreur :
-      await FirebaseRoleService().signInWithRole(
-        email: _emailController.text,
-        password: _passwordController.text,
+      final emailInput = _emailController.text.trim();
+      final passwordInput = _passwordController.text.trim();
+
+      // Connexion Firebase + vérification du rôle livreur dans Firestore :
+      final credential = await FirebaseRoleService().signInWithRole(
+        email: emailInput,
+        password: passwordInput,
         requiredRole: UserRole.deliverer,
       );
 
       if (!mounted) return;
       HapticFeedback.lightImpact();
 
-      // Vérifier si l'utilisateur a déjà changé son mot de passe lors de sa 1ère connexion
-      final currentUser = authService.currentUser;
-      final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
-      final hasChangedPassword = currentUser != null &&
-          (prefs.getBool('first_password_changed_${currentUser.uid}') ?? false);
+      final user = credential.user ?? FirebaseAuth.instance.currentUser;
+      final roleService = FirebaseRoleService();
+      final mustChange =
+          user != null && await roleService.requiresPasswordChange(user);
 
-      if (!hasChangedPassword) {
-        // Premier login : redirection vers l'écran de modification du mot de passe
-        await Navigator.pushReplacement(
+      if (!mounted) return;
+
+      if (mustChange) {
+        // Première connexion -> Écran de changement de mot de passe
+        await Navigator.pushAndRemoveUntil(
           context,
           SlideFadePageRoute(page: const PasswordScreen()),
+          (route) => false,
         );
       } else {
-        // Connexions ultérieures : redirection directe vers le Dashboard
+        // Redirection vers AuthGate / Dashboard
         await Navigator.pushAndRemoveUntil(
           context,
           SlideFadePageRoute(page: const AuthGate()),
@@ -124,8 +123,7 @@ class _LoginScreenState extends State<LoginScreen>
           errorMessage = 'Trop de tentatives. Veuillez réessayer plus tard.';
           break;
         case 'invalid-credential':
-          errorMessage =
-              'E-mail ou mot de passe incorrect. Veuillez vérifier vos identifiants.';
+          errorMessage = 'E-mail ou mot de passe incorrect. Veuillez vérifier vos identifiants.';
           break;
         default:
           if (e.message != null && e.message!.isNotEmpty) {
@@ -138,10 +136,7 @@ class _LoginScreenState extends State<LoginScreen>
       AppSnackBar.showError(context, e.toString());
     } catch (e) {
       if (!mounted) return;
-      AppSnackBar.showError(
-        context,
-        'Erreur de connexion : ${e.toString()}',
-      );
+      AppSnackBar.showError(context, 'Erreur de connexion : ${e.toString()}');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -252,8 +247,9 @@ class _LoginScreenState extends State<LoginScreen>
                                 ),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withValues(alpha: 0.16),
-                                  borderRadius:
-                                      BorderRadius.circular(AppRadius.pill),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.pill,
+                                  ),
                                 ),
                                 child: const Text(
                                   'Espace livreur',
@@ -297,19 +293,17 @@ class _LoginScreenState extends State<LoginScreen>
                     'Bienvenue',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   Text(
                     'Connectez-vous à votre compte',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: isDark
-                              ? AppColors.darkMuted
-                              : AppColors.mutedText,
-                        ),
+                      color: isDark ? AppColors.darkMuted : AppColors.mutedText,
+                    ),
                   ),
 
                   const SizedBox(height: 28),
@@ -378,8 +372,7 @@ class _LoginScreenState extends State<LoginScreen>
                                       value: _keepSignedIn,
                                       activeColor: AppColors.primary,
                                       shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(4),
+                                        borderRadius: BorderRadius.circular(4),
                                       ),
                                       onChanged: (v) => setState(
                                         () => _keepSignedIn = v ?? false,
@@ -447,11 +440,11 @@ class _LoginScreenState extends State<LoginScreen>
                       Text(
                         'Connexion sécurisée • Dokan Livreur',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: isDark
-                                  ? AppColors.darkMuted
-                                  : AppColors.mutedText,
-                              fontWeight: FontWeight.w500,
-                            ),
+                          color: isDark
+                              ? AppColors.darkMuted
+                              : AppColors.mutedText,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),

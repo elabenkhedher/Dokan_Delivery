@@ -2,6 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Votre position est nécessaire pour guider vos livraisons et partager votre avancée avec le client.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>La localisation continue permet de maintenir le guidage GPS même lorsque vous consultez une autre application.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>L'accès à l'appareil photo est nécessaire pour scanner le QR Code d'enlèvement de stock à l'entrepôt.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

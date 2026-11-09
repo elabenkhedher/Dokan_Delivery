@@ -1,0 +1,53 @@
+{
+  "rules": {
+    "deliverers_live": {
+      "$delivererId": {
+        ".read": "auth != null && (auth.token.role === 'admin' || auth.uid === $delivererId || (data.child('currentOrderId').exists() && data.child('currentOrderId').val() != null && root.child('orders').child(data.child('currentOrderId').val()).child('clientId').val() === auth.uid && root.child('orders').child(data.child('currentOrderId').val()).child('delivererId').val() === $delivererId))",
+        ".write": "auth != null && auth.uid === $delivererId",
+        ".validate": "newData.hasChildren(['delivererId', 'latitude', 'longitude', 'heading', 'speed', 'timestamp', 'isOnline'])",
+        "delivererId": {
+          ".validate": "newData.isString() && newData.val() === $delivererId"
+        },
+        "delivererName": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "latitude": {
+          ".validate": "newData.isNumber() && newData.val() >= -90.0 && newData.val() <= 90.0"
+        },
+        "longitude": {
+          ".validate": "newData.isNumber() && newData.val() >= -180.0 && newData.val() <= 180.0"
+        },
+        "heading": {
+          ".validate": "newData.isNumber() && newData.val() >= 0.0 && newData.val() <= 360.0"
+        },
+        "speed": {
+          ".validate": "newData.isNumber() && newData.val() >= 0.0"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber()"
+        },
+        "isOnline": {
+          ".validate": "newData.isBoolean()"
+        },
+        "status": {
+          ".validate": "newData.val() == null || newData.isString()"
+        },
+        "currentOrderId": {
+          ".validate": "newData.val() == null || newData.isString()"
+        },
+        "vehicle": {
+          ".validate": "newData.hasChildren()"
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+    "orders": {
+      "$orderId": {
+        ".read": "auth != null && (auth.token.role === 'admin' || data.child('clientId').val() === auth.uid || data.child('delivererId').val() === auth.uid)",
+        ".write": "auth != null && (auth.token.role === 'admin' || data.child('delivererId').val() === auth.uid)"
+      }
+    }
+  }
+}

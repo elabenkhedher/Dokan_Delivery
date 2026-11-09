@@ -103,6 +103,34 @@ class OrderCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
+                    if (order.totalPoids > 0) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? AppColors.darkSurfaceAlt
+                              : AppColors.surfaceAlt,
+                          borderRadius: BorderRadius.circular(AppRadius.xs),
+                          border: Border.all(
+                            color: isDark ? AppColors.darkBorder : AppColors.border,
+                          ),
+                        ),
+                        child: Text(
+                          '${order.totalPoids % 1 == 0 ? order.totalPoids.toInt() : order.totalPoids.toStringAsFixed(1)} kg',
+                          style: TextStyle(
+                            color: isDark
+                                ? AppColors.darkMuted
+                                : AppColors.mutedText,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,

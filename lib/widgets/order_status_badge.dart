@@ -9,16 +9,23 @@ class OrderStatusHelper {
   static Color color(BuildContext context, String status) {
     switch (status) {
       case DeliveryOrder.delivered:
+      case 'livre':
+      case 'Livré':
         return AppColors.success;
       case DeliveryOrder.inProgress:
       case 'En cours de livraison':
+      case 'enleve':
+      case 'Enlevé':
+      case 'Enlevée':
         return AppColors.warning;
-      case DeliveryOrder.refused:
       case DeliveryOrder.deliveryFailed:
       case DeliveryOrder.cancelled:
+      case 'echec':
+      case 'Échec':
+      case 'Retour':
+      case 'Retour / Échec':
+      case 'Refusée':
         return Theme.of(context).colorScheme.error;
-      case DeliveryOrder.assigned:
-      case DeliveryOrder.awaitingPickup:
       case 'Affectée':
       default:
         return Theme.of(context).colorScheme.primary;
@@ -28,17 +35,25 @@ class OrderStatusHelper {
   static IconData icon(String status) {
     switch (status) {
       case DeliveryOrder.delivered:
+      case 'livre':
+      case 'Livré':
         return Icons.check_circle_rounded;
       case DeliveryOrder.inProgress:
       case 'En cours de livraison':
+      case 'enleve':
+      case 'Enlevé':
+      case 'Enlevée':
         return Icons.directions_car_rounded;
-      case DeliveryOrder.refused:
       case DeliveryOrder.deliveryFailed:
-        return Icons.block_rounded;
+      case 'echec':
+      case 'Échec':
+      case 'Retour':
+      case 'Retour / Échec':
+        return Icons.assignment_return_rounded;
       case DeliveryOrder.cancelled:
+      case 'Refusée':
+      case 'annule':
         return Icons.cancel_outlined;
-      case DeliveryOrder.assigned:
-      case DeliveryOrder.awaitingPickup:
       case 'Affectée':
       default:
         return Icons.local_shipping_outlined;

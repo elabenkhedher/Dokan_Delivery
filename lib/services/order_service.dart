@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/delivery_order.dart';
 import '../models/delivery_stats.dart';
@@ -71,8 +75,7 @@ class OrderService {
       .where((order) => !order.isDelivered && !order.isFailedOrRefused)
       .length;
 
-  int get awaitingOrders =>
-      _orders.where((order) => order.isAssigned).length;
+  int get awaitingOrders => 0;
 
   int get inProgressOrders =>
       _orders.where((order) => order.isInProgress).length;
@@ -85,7 +88,7 @@ class OrderService {
       .fold(0.0, (acc, order) => acc + order.total);
 
   double get pendingRevenue => _orders
-      .where((order) => order.isInProgress || order.isAssigned)
+      .where((order) => order.isInProgress)
       .fold(0.0, (acc, order) => acc + order.total);
 
   // ── Statistiques dynamiques selon les commandes réelles ───────────────────
@@ -96,8 +99,7 @@ class OrderService {
         orderList.where((order) => order.isDelivered).length;
     final curInProgress =
         orderList.where((order) => order.isInProgress).length;
-    final curAwaiting =
-        orderList.where((order) => order.isAssigned).length;
+    final curAwaiting = 0;
     final curRefused =
         orderList.where((order) => order.isFailedOrRefused).length;
     final curRevenue = orderList
@@ -397,28 +399,90 @@ class OrderService {
     refuseOrder(order);
   }
 
-  Future<void> marquerEchecCommande(DeliveryOrder order, [String? reason]) async {
-    order.markAsFailed();
+  /// Marque une commande comme livrée (statut officiel Dokan 'livre')
+  Future<void> marquerLivree(DeliveryOrder order) async {
+    _ensureOrderExists(order);
+    order.markAsDelivered();
     _streamController.add(List.unmodifiable(_orders));
+    final updateData = {
+      'status': 'livre',
+      'isDelivered': true,
+      'deliveredAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'at': Timestamp.now(),
+          'status': 'livre',
+          'comment': 'Colis livré avec succès au client.',
+        }
+      ]),
+    };
     try {
-      await _firestore?.collection('commandes').doc(order.id).update({
-        'status': order.status,
-        'failedAt': Timestamp.now(),
-        if (reason != null && reason.isNotEmpty) 'motifEchec': reason,
-      });
+      await _firestore?.collection('orders').doc(order.id).update(updateData);
+    } catch (_) {}
+    try {
+      await _firestore?.collection('commandes').doc(order.id).set(
+        updateData,
+        SetOptions(merge: true),
+      );
+    } catch (_) {}
+  }
+
+  /// Déclare un échec ou refus de livraison (statut officiel Dokan 'echec')
+  Future<void> marquerEchecCommande(DeliveryOrder order, [String? reason]) async {
+    _ensureOrderExists(order);
+    order.markAsFailed(reason);
+    _streamController.add(List.unmodifiable(_orders));
+    final updateData = {
+      'status': 'echec',
+      'failedAt': FieldValue.serverTimestamp(),
+      if (reason != null && reason.isNotEmpty) 'motifEchec': reason,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'statusHistory': FieldValue.arrayUnion([
+        {
+          'at': Timestamp.now(),
+          'status': 'echec',
+          'comment': reason != null && reason.isNotEmpty
+              ? 'Échec de livraison : $reason'
+              : 'Échec de livraison.',
+        }
+      ]),
+    };
+    try {
+      await _firestore?.collection('orders').doc(order.id).update(updateData);
+    } catch (_) {}
+    try {
+      await _firestore?.collection('commandes').doc(order.id).set(
+        updateData,
+        SetOptions(merge: true),
+      );
     } catch (_) {}
   }
 
   void _syncStatusToFirestore(DeliveryOrder order) {
+    // Mapping statuts internes → statuts Dokan Firestore (collection 'orders')
+    const reverseMap = <String, String>{
+      'Affectée à un livreur': 'en cours',
+      'En cours': 'enleve',
+      'En cours de livraison': 'enleve',
+      'Livrée': 'livre',
+      'Échec de livraison': 'echec',
+      'Refusée': 'echec',
+      'Annulée': 'annule',
+    };
+    final firestoreStatus = reverseMap[order.status] ?? order.status;
     try {
-      _firestore?.collection('commandes').doc(order.id).update({
-        'status': order.status,
+      _firestore?.collection('orders').doc(order.id).update({
+        'status': firestoreStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
         if (order.inProgressAt != null)
           'inProgressAt': Timestamp.fromDate(order.inProgressAt!),
         if (order.deliveredAt != null)
           'deliveredAt': Timestamp.fromDate(order.deliveredAt!),
         if (order.failedAt != null)
           'failedAt': Timestamp.fromDate(order.failedAt!),
+        if (order.motifEchec != null)
+          'motifEchec': order.motifEchec,
       }).catchError((_) {});
     } catch (_) {
       // Ignoré si Firestore n'est pas initialisé ou en mode hors-ligne
@@ -431,14 +495,21 @@ class OrderService {
       final user = _currentUser;
       final firestore = _firestore;
       if (user != null && firestore != null) {
-        // Requête sur la collection 'commandes' filtrée strictement par l'UID du livreur
+        // Requête conforme aux règles Firestore : resource.data.livreurId == request.auth.uid
         return firestore
-            .collection('commandes')
+            .collection('orders')
             .where('livreurId', isEqualTo: user.uid)
             .snapshots()
             .map((snapshot) {
           final realOrders = snapshot.docs
-              .map((doc) => DeliveryOrder.fromFirestore(doc))
+              .map((doc) {
+                try {
+                  return DeliveryOrder.fromFirestore(doc);
+                } catch (e) {
+                  return null;
+                }
+              })
+              .whereType<DeliveryOrder>()
               .toList();
           // Mettre à jour le cache local du service
           _orders.clear();
@@ -456,5 +527,139 @@ class OrderService {
     } catch (_) {
       return Stream.value(getOrders());
     }
+  }
+
+  /// Validation directe d'un scan de bon d'enlèvement (Dokan Delivery)
+  Future<void> validerScanBonEnlevement(String rawScannedCode) =>
+      _orderServiceValiderScanBonEnlevement(rawScannedCode);
+}
+
+/// Cache des codes d'enlèvement récemment validés
+final Set<String> _recentlyScannedPickupCodes = <String>{};
+
+/// Indique si un code a été récemment validé via [validerScanBonEnlevement]
+bool isPickupCodeRecentlyValidated(String code) {
+  return _recentlyScannedPickupCodes.contains(code.trim());
+}
+
+/// Consomme la marque de validation récente pour ce code
+bool consumeRecentlyValidatedPickupCode(String code) {
+  return _recentlyScannedPickupCodes.remove(code.trim());
+}
+
+/// Alias méthode pour OrderService
+Future<void> _orderServiceValiderScanBonEnlevement(String rawScannedCode) =>
+    validerScanBonEnlevement(rawScannedCode);
+
+/// Valide le scan d'un bon d'enlèvement côté livreur et met à jour
+/// le statut des commandes à 'enleve' dans 'commandes' et 'orders'.
+Future<void> validerScanBonEnlevement(String rawScannedCode) async {
+  String cleanCode = rawScannedCode.trim();
+  
+  // Si le scanner a capturé du JSON, extraire le serialCode
+  if (cleanCode.startsWith('{') && cleanCode.contains('serialCode')) {
+    try {
+      final decoded = jsonDecode(cleanCode);
+      cleanCode = decoded['serialCode']?.toString() ?? cleanCode;
+    } catch (_) {}
+  }
+
+  _recentlyScannedPickupCodes.add(cleanCode);
+  _recentlyScannedPickupCodes.add(rawScannedCode.trim());
+
+  final firestore = FirebaseFirestore.instance;
+  final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  // 1. Récupérer le bon d'enlèvement (cherche dans bons_enlevement ET stock_pickups)
+  DocumentSnapshot? bonDoc;
+  try {
+    final doc1 = await firestore.collection('bons_enlevement').doc(cleanCode).get();
+    if (doc1.exists) {
+      bonDoc = doc1;
+    } else {
+      final doc2 = await firestore.collection('stock_pickups').doc(cleanCode).get();
+      if (doc2.exists) bonDoc = doc2;
+    }
+
+    // Fallback par requête sur serialCode si doc(cleanCode) n'existe pas
+    if (bonDoc == null || !bonDoc.exists) {
+      final q1 = await firestore
+          .collection('bons_enlevement')
+          .where('serialCode', isEqualTo: cleanCode)
+          .limit(1)
+          .get();
+      if (q1.docs.isNotEmpty) {
+        bonDoc = q1.docs.first;
+      } else {
+        final q2 = await firestore
+            .collection('stock_pickups')
+            .where('serialCode', isEqualTo: cleanCode)
+            .limit(1)
+            .get();
+        if (q2.docs.isNotEmpty) bonDoc = q2.docs.first;
+      }
+    }
+  } catch (e) {
+    debugPrint('[validerScanBonEnlevement] Erreur lecture Firestore: $e');
+  }
+
+  List<String> orderIds = [];
+  if (bonDoc != null && bonDoc.exists) {
+    final data = bonDoc.data() as Map<String, dynamic>;
+    final rawOrders = data['orderIds'] ?? data['commandes'] ?? data['orders'];
+    if (rawOrders is List) {
+      orderIds = rawOrders.map((e) => e.toString()).toList();
+    }
+
+    // Marquer le bon comme scanné
+    try {
+      await bonDoc.reference.set({
+        'status': 'scanned',
+        'scannedAt': FieldValue.serverTimestamp(),
+        'scannedBy': uid,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[validerScanBonEnlevement] Erreur update bon: $e');
+    }
+  }
+
+  // 2. CRUCIAL : Mettre à jour toutes les commandes au statut "enleve"
+  // Écrit à la fois dans 'commandes' et dans 'orders'
+  final updatePayload = {
+    'status': 'enleve',
+    'isPickedUp': true,
+    'pickedUpAt': FieldValue.serverTimestamp(),
+    'updatedAt': FieldValue.serverTimestamp(),
+  };
+
+  for (final orderId in orderIds) {
+    try {
+      await Future.wait([
+        firestore.collection('commandes').doc(orderId).set(updatePayload, SetOptions(merge: true)),
+        firestore.collection('orders').doc(orderId).set(updatePayload, SetOptions(merge: true)),
+      ]);
+    } catch (e) {
+      debugPrint('[validerScanBonEnlevement] Erreur update commande $orderId: $e');
+    }
+  }
+
+  // 3. Mettre à jour le statut du livreur dans Realtime Database
+  if (uid.isNotEmpty) {
+    try {
+      final rtdb = FirebaseDatabase.instanceFor(
+        app: Firebase.app(),
+        databaseURL: 'https://ee-comeerce-default-rtdb.firebaseio.com/',
+      );
+      await rtdb.ref('deliverers_live/$uid/stockPickup').update({
+        'status': 'scanned',
+        'scannedAt': DateTime.now().toIso8601String(),
+        'scannedBy': uid,
+      });
+      await rtdb.ref('deliverers_live/$uid').update({
+        'status': 'in_progress',
+        'isOnline': true,
+      });
+    } catch (_) {}
   }
 }

@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../models/delivery_order.dart';
+import '../models/driver_profile.dart';
+import '../models/stock_pickup.dart';
 import '../services/order_service.dart';
+import '../services/stock_pickup_service.dart';
 import '../services/working_hours_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
 import '../widgets/bouncy_button.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/order_card.dart';
+import '../widgets/stock_pickup_banner.dart';
 import 'order_details_screen.dart';
 
 typedef CommandesScreen = OrdersScreen;
@@ -15,8 +19,12 @@ typedef CommandesScreen = OrdersScreen;
 class OrdersScreen extends StatefulWidget {
   final OrderService? orderService;
   final WorkingHoursService? workingHoursService;
+  final StockPickupService? stockPickupService;
   final List<DeliveryOrder>? orders;
+  final DriverProfile? driverProfile;
+  final String? initialFilter;
   final void Function(DeliveryOrder)? onOrderTap;
+  final void Function(StockPickup)? onPickupCompleted;
   final Future<void> Function()? onRefresh;
   final bool isEmbedded;
 
@@ -24,8 +32,12 @@ class OrdersScreen extends StatefulWidget {
     super.key,
     this.orderService,
     this.workingHoursService,
+    this.stockPickupService,
     this.orders,
+    this.driverProfile,
+    this.initialFilter,
     this.onOrderTap,
+    this.onPickupCompleted,
     this.onRefresh,
     this.isEmbedded = false,
   });
@@ -37,13 +49,14 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> {
   late final OrderService _orderService;
   late final WorkingHoursService _workingHoursService;
-  String _activeFilter = 'Toutes';
+  late String _activeFilter;
 
   @override
   void initState() {
     super.initState();
     _orderService = widget.orderService ?? OrderService();
     _workingHoursService = widget.workingHoursService ?? WorkingHoursService();
+    _activeFilter = widget.initialFilter ?? 'Toutes';
   }
 
   void _openOrder(DeliveryOrder order) async {
@@ -77,14 +90,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final allOrders = widget.orders ?? _orderService.getOrders();
+    final activeOrders =
+        allOrders.where((o) => o.isInProgress || o.isAssigned).toList();
 
     final filteredOrders = switch (_activeFilter) {
-      'À récupérer' || 'À traiter' => allOrders
-          .where((o) => o.isAssigned)
-          .toList(),
-      'En cours' =>
-        allOrders.where((o) => o.isInProgress).toList(),
-      'Terminées' => allOrders
+      'Tournée active' || 'Tournée en cours' || 'En cours' || 'Actives' =>
+        activeOrders,
+      'Terminées' || 'Livrées' => allOrders
           .where((o) => o.isDelivered || o.isFailedOrRefused)
           .toList(),
       _ => allOrders,
@@ -118,8 +130,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children:
-                  ['Toutes', 'À récupérer', 'En cours', 'Terminées'].map((f) {
-                final isSelected = _activeFilter == f;
+                  ['Toutes', 'Tournée active', 'Terminées'].map((f) {
+                final isSelected = _activeFilter == f ||
+                    (_activeFilter == 'En cours' && f == 'Tournée active');
                 return Padding(
                   padding: const EdgeInsets.only(right: 8.0),
                   child: BouncyButton(
@@ -166,6 +179,32 @@ class _OrdersScreenState extends State<OrdersScreen> {
             ),
           ),
           const SizedBox(height: 18),
+
+          // ── Bannière Enlèvement Stock (si des colis attendent ou sur tournée active) ──
+          Builder(
+            builder: (context) {
+              final pendingStockCount = allOrders
+                  .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
+                  .length;
+              if (pendingStockCount > 0 || _activeFilter == 'Tournée active') {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: StockPickupBanner(
+                    pendingOrdersCount: pendingStockCount,
+                    pickupService: widget.stockPickupService,
+                    delivererUid: widget.driverProfile?.uid,
+                    onPickupCompleted: (pickup) {
+                      setState(() => _activeFilter = 'Tournée active');
+                      if (widget.onPickupCompleted != null) {
+                        widget.onPickupCompleted!(pickup);
+                      }
+                    },
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
 
           if (filteredOrders.isEmpty)
             const EmptyState(message: 'Aucune commande disponible.')

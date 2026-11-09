@@ -1,31 +1,41 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/delivery_order.dart';
 import '../models/delivery_stats.dart';
+import '../models/driver_profile.dart';
+import '../models/stock_pickup.dart';
 import '../services/order_service.dart';
+import '../services/profile_service.dart';
+import '../services/stock_pickup_service.dart';
 import '../services/working_hours_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
-import '../utils/snackbar_helper.dart';
 import '../widgets/bouncy_button.dart';
 import '../widgets/daily_goal_card.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/interactive_activity_chart.dart';
 import '../widgets/order_card.dart';
-import '../widgets/pending_order_card.dart';
 import '../widgets/period_selector.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/status_breakdown_card.dart';
+import '../widgets/stock_pickup_banner.dart';
+import '../widgets/vehicle_payload_card.dart';
 import 'order_details_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final OrderService? orderService;
   final WorkingHoursService? workingHoursService;
   final List<DeliveryOrder>? orders;
+  final DriverProfile? driverProfile;
+  final ProfileService? profileService;
+  final StockPickupService? stockPickupService;
   final String? firestoreError;
   final void Function(DeliveryOrder)? onOrderTap;
   final VoidCallback? onViewAllOrders;
+  final void Function(StockPickup)? onPickupCompleted;
   final Future<void> Function()? onRefresh;
   final bool isEmbedded;
 
@@ -34,9 +44,13 @@ class HomeScreen extends StatefulWidget {
     this.orderService,
     this.workingHoursService,
     this.orders,
+    this.driverProfile,
+    this.profileService,
+    this.stockPickupService,
     this.firestoreError,
     this.onOrderTap,
     this.onViewAllOrders,
+    this.onPickupCompleted,
     this.onRefresh,
     this.isEmbedded = false,
   });
@@ -48,6 +62,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final OrderService _orderService;
   late final WorkingHoursService _workingHoursService;
+  late final ProfileService _profileService;
+  DriverProfile? _driverProfile;
+  StreamSubscription<DriverProfile?>? _profileSub;
   String _selectedFilter = 'Toutes';
   DashboardPeriod _selectedPeriod = DashboardPeriod.today;
 
@@ -56,6 +73,29 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _orderService = widget.orderService ?? OrderService();
     _workingHoursService = widget.workingHoursService ?? WorkingHoursService();
+    _profileService = widget.profileService ?? ProfileService();
+    _driverProfile = widget.driverProfile;
+    if (_driverProfile == null) {
+      _profileSub = _profileService.streamProfile().listen((p) {
+        if (mounted && p != null) {
+          setState(() => _driverProfile = p);
+        }
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.driverProfile != null) {
+      _driverProfile = widget.driverProfile;
+    }
+  }
+
+  @override
+  void dispose() {
+    _profileSub?.cancel();
+    super.dispose();
   }
 
   void _openOrder(DeliveryOrder order) async {
@@ -86,72 +126,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _acceptPendingOrder(DeliveryOrder order) async {
-    HapticFeedback.mediumImpact();
-    try {
-      _orderService.advanceStatus(order);
-      if (mounted) {
-        setState(() {});
-        AppSnackBar.showSuccess(
-          context,
-          'Commande #${order.id} acceptée ! Vous pouvez commencer la livraison.',
-        );
-      }
-    } on StateError catch (error) {
-      if (mounted) {
-        AppSnackBar.showError(context, error.message);
-      }
-    }
-  }
-
-  Future<void> _refusePendingOrder(DeliveryOrder order) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-        ),
-        title: Text(
-          'Refuser la commande #${order.id} ?',
-          style: const TextStyle(fontWeight: FontWeight.w800),
-        ),
-        content: const Text(
-          'Cette décision est définitive et la commande sera refusée.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Confirmer le refus'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !mounted) return;
-
-    try {
-      _orderService.refuseOrder(order);
-      if (mounted) {
-        setState(() {});
-        AppSnackBar.showSuccess(context, 'Commande #${order.id} refusée.');
-      }
-    } on StateError catch (error) {
-      if (mounted) {
-        AppSnackBar.showError(context, error.message);
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -160,21 +134,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final isWorking = _workingHoursService.isLoaded &&
         _workingHoursService.isWorkingAt(now);
 
+    final effectiveProfile = widget.driverProfile ?? _driverProfile;
+    final maxCapacityKg = effectiveProfile?.maxCapacityKg ?? 100.0;
+
     final stats = _orderService.getStatsForPeriod(_selectedPeriod, orders: allOrders);
-    final pendingOrders = allOrders
-        .where((o) => o.isAssigned)
-        .toList();
+    final pendingStockCount = allOrders
+        .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
+        .length;
 
     final filteredOrders = switch (_selectedFilter) {
-      'À récupérer' || 'À traiter' => allOrders
-          .where((o) => o.isAssigned)
-          .toList(),
       'En cours' => allOrders
-          .where((o) => o.isInProgress || o.isAssigned)
+          .where((o) => o.isInProgress)
           .toList(),
       'Livrées' =>
         allOrders.where((o) => o.isDelivered).toList(),
-      'Refusées' || 'Échecs' =>
+      'Échecs / Retours' || 'Échecs' || 'Retours' || 'Refusées' =>
         allOrders.where((o) => o.isFailedOrRefused).toList(),
       _ => allOrders,
     };
@@ -317,67 +291,30 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // ── Commandes en attente d'acceptation (À récupérer) ──
-          if (pendingOrders.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent.withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.notifications_active_rounded,
-                    size: 16,
-                    color: AppColors.accent,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Commandes en attente (${pendingOrders.length})',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2,
-                        ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.pill),
-                  ),
-                  child: const Text(
-                    'À traiter',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.accent,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            ...pendingOrders.map(
-              (order) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: PendingOrderCard(
-                  key: ValueKey('pending-card-${order.id}'),
-                  order: order,
-                  onAccept: () => _acceptPendingOrder(order),
-                  onRefuse: () => _refusePendingOrder(order),
-                  onTap: () => _openOrder(order),
-                ),
-              ),
-            ),
-          ],
+          const SizedBox(height: 18),
+
+          // ── Bannière Enlèvement Stock & Départ Tournée ───────
+          StockPickupBanner(
+            pendingOrdersCount: pendingStockCount,
+            pickupService: widget.stockPickupService,
+            delivererUid: effectiveProfile?.uid,
+            onPickupCompleted: widget.onPickupCompleted ??
+                (_) {
+                  if (widget.onViewAllOrders != null) {
+                    widget.onViewAllOrders!();
+                  }
+                },
+          ),
+
+          const SizedBox(height: 18),
+
+          // ── Jauge de charge utile du véhicule (Payload Gauge) ──
+          VehiclePayloadCard(
+            orders: allOrders,
+            maxCapacityKg: maxCapacityKg,
+            vehicleType: effectiveProfile?.assignedVehicleType,
+            onTap: widget.onViewAllOrders,
+          ),
 
           const SizedBox(height: 24),
 
@@ -456,8 +393,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           : null,
                       isPositiveTrend: stats.inProgressOrders > 0,
                       isSelected: _selectedFilter == 'En cours',
-                      subtitle: stats.awaitingPickupOrders > 0
-                          ? '${stats.awaitingPickupOrders} en attente'
+                      subtitle: stats.inProgressOrders > 0
+                          ? '${stats.inProgressOrders} en tournée'
                           : 'En livraison',
                       onTap: () {
                         setState(() => _selectedFilter = 'En cours');
@@ -546,7 +483,7 @@ class _HomeScreenState extends State<HomeScreen> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: ['Toutes', 'En cours', 'Livrées', 'À récupérer']
+              children: ['Toutes', 'En cours', 'Livrées']
                   .map((filter) {
                 final isSelected = _selectedFilter == filter;
                 return Padding(

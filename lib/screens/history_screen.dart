@@ -84,7 +84,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final filteredList = switch (_activeFilter) {
       'Livrées' =>
         baseList.where((o) => o.isDelivered).toList(),
-      'Refusées' || 'Échecs' =>
+      'Échecs / Retours' || 'Échecs' || 'Retours' || 'Refusées' =>
         baseList.where((o) => o.isFailedOrRefused).toList(),
       _ => baseList,
     };
@@ -105,7 +105,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Commandes livrées et refusées.',
+            'Commandes livrées et retours / échecs de livraison.',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: isDark ? AppColors.darkMuted : AppColors.mutedText,
                 ),
@@ -116,8 +116,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: ['Toutes', 'Livrées', 'Refusées'].map((f) {
-                final isSelected = _activeFilter == f;
+              children: ['Toutes', 'Livrées', 'Échecs / Retours'].map((f) {
+                final isSelected = _activeFilter == f ||
+                    (_activeFilter == 'Échecs' && f == 'Échecs / Retours') ||
+                    (_activeFilter == 'Refusées' && f == 'Échecs / Retours');
                 return Padding(
                   padding: const EdgeInsets.only(right: 8.0),
                   child: BouncyButton(

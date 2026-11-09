@@ -1,1 +1,41 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"ee-comeerce","appId":"1:247256040910:android:ca3d366fa1a3991da2979f","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"ee-comeerce","configurations":{"android":"1:247256040910:android:ca3d366fa1a3991da2979f","ios":"1:247256040910:ios:bba75ebd06a0658fa2979f","macos":"1:247256040910:ios:bba75ebd06a0658fa2979f","web":"1:247256040910:web:00c25ec7a57c0bada2979f","windows":"1:247256040910:web:2d6f8fe24b674faca2979f"}}}}}}
+{
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    }
+  ],
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "ee-comeerce",
+          "appId": "1:247256040910:android:ca3d366fa1a3991da2979f",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "ee-comeerce",
+          "configurations": {
+            "android": "1:247256040910:android:ca3d366fa1a3991da2979f",
+            "ios": "1:247256040910:ios:bba75ebd06a0658fa2979f",
+            "macos": "1:247256040910:ios:bba75ebd06a0658fa2979f",
+            "web": "1:247256040910:web:00c25ec7a57c0bada2979f",
+            "windows": "1:247256040910:web:2d6f8fe24b674faca2979f"
+          }
+        }
+      }
+    }
+  }
+}
