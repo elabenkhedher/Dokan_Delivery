@@ -38,8 +38,20 @@
         "vehicle": {
           ".validate": "newData.hasChildren()"
         },
+        "updatedAt": {
+          ".validate": "newData.val() == null || newData.isString() || newData.isNumber()"
+        },
+        "last_serial_code": {
+          ".validate": "newData.val() == null || newData.isString()"
+        },
+        "pendingPickup": {
+          ".validate": "true"
+        },
+        "stockPickup": {
+          ".validate": "true"
+        },
         "$other": {
-          ".validate": false
+          ".validate": "true"
         }
       }
     },

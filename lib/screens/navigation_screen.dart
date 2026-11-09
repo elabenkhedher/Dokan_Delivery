@@ -11,17 +11,20 @@ import '../models/delivery_order.dart';
 import '../services/navigation/location_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/delivery_qr_dialog.dart';
 
 /// Écran complet de navigation GPS temps réel basé sur OpenStreetMap (100% gratuit, sans clé payante).
 class NavigationScreen extends StatelessWidget {
-  final DeliveryOrder order;
-  final LatLng destination;
+  final DeliveryOrder? order;
+  final LatLng? destination;
+  final List<DeliveryOrder>? tourOrders;
   final Map<String, dynamic>? vehicleInfo;
 
   const NavigationScreen({
     super.key,
-    required this.order,
-    required this.destination,
+    this.order,
+    this.destination,
+    this.tourOrders,
     this.vehicleInfo,
   });
 
@@ -32,6 +35,7 @@ class NavigationScreen extends StatelessWidget {
         ..initialize(
           deliveryOrder: order,
           clientDestination: destination,
+          tourOrders: tourOrders,
           assignedVehicle: vehicleInfo,
         ),
       child: const _NavigationScreenBody(),
@@ -72,6 +76,29 @@ class _NavigationScreenBody extends StatelessWidget {
       Clipboard.setData(ClipboardData(text: address));
       if (context.mounted) {
         AppSnackBar.showSuccess(context, 'Adresse copiée dans le presse-papier.');
+      }
+    }
+  }
+
+  Future<void> _openDeliveryQr(
+    BuildContext context,
+    NavigationController controller,
+  ) async {
+    HapticFeedback.heavyImpact();
+    final success = await DeliveryQrDialog.show(
+      context: context,
+      order: controller.order,
+      orderService: controller.orderService,
+    );
+    if (success == true) {
+      await controller.completeDelivery();
+      if (context.mounted) {
+        if (controller.remainingTourOrdersCount == 0) {
+          AppSnackBar.showSuccess(
+              context, 'Toutes les commandes de la tournée ont été livrées !');
+        } else {
+          AppSnackBar.showSuccess(context, 'Livraison terminée avec succès !');
+        }
       }
     }
   }
@@ -148,7 +175,7 @@ class _NavigationScreenBody extends StatelessWidget {
                 keepBuffer: 2,
               ),
 
-              // Tracé de l'itinéraire OSRM (Ligne bleue)
+              // Tracé de l'itinéraire OSRM (Ligne bleue) vers la commande sélectionnée
               if (controller.routePoints.isNotEmpty)
                 PolylineLayer(
                   polylines: [
@@ -160,16 +187,44 @@ class _NavigationScreenBody extends StatelessWidget {
                   ],
                 ),
 
-              // Marqueurs : Client & Véhicule Livreur
+              // Marqueurs : Commandes de la tournée & Véhicule Livreur
               MarkerLayer(
                 markers: [
-                  // 1. Marqueur Destination (Client)
-                  Marker(
-                    point: controller.destination,
-                    width: 44,
-                    height: 44,
-                    child: const _ClientDestinationMarker(),
-                  ),
+                  // 1. Tous les marqueurs des commandes de la tournée
+                  if (controller.tourOrders.isNotEmpty)
+                    ...controller.tourOrders.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final o = entry.value;
+                      final isSelected = o.id == controller.order.id;
+                      return Marker(
+                        point: o.destinationLatLng,
+                        width: isSelected ? 52 : 38,
+                        height: isSelected ? 52 : 38,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            controller.selectOrder(o);
+                          },
+                          child: _OrderStopMarker(
+                            stopNumber: index + 1,
+                            isSelected: isSelected,
+                            isDelivered: o.isDelivered,
+                            displayNumber: o.displayNumber.isNotEmpty
+                                ? o.displayNumber
+                                : o.id,
+                          ),
+                        ),
+                      );
+                    })
+                  else
+                    // Marqueur unique Client classique
+                    Marker(
+                      point: controller.destination,
+                      width: 44,
+                      height: 44,
+                      child: const _ClientDestinationMarker(),
+                    ),
 
                   // 2. Marqueur du véhicule (avec rotation selon le cap)
                   if (controller.currentLocation != null)
@@ -217,12 +272,34 @@ class _NavigationScreenBody extends StatelessWidget {
             ),
           ),
 
-          // D. Bouton "Recentrer" si le suivi de caméra a été déplacé manuellement
+          // D1. Bouton "Vue d'ensemble de la tournée"
+          if (controller.tourOrders.length > 1)
+            Positioned(
+              right: 16,
+              bottom: controller.isArrived ? 260 : 255,
+              child: FloatingActionButton.extended(
+                heroTag: 'fab_tour_overview',
+                backgroundColor: Colors.white,
+                foregroundColor: AppColors.text,
+                elevation: 4,
+                onPressed: controller.fitAllStops,
+                icon: const Icon(Icons.map_rounded, size: 20, color: AppColors.primary),
+                label: Text(
+                  'Tournée (${controller.remainingTourOrdersCount}/${controller.tourOrders.length})',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+
+          // D2. Bouton "Recentrer" si le suivi de caméra a été déplacé manuellement
           if (!controller.isTrackingCamera)
             Positioned(
               right: 16,
-              bottom: 190,
+              bottom: controller.tourOrders.length > 1
+                  ? (controller.isArrived ? 315 : 310)
+                  : (controller.isArrived ? 260 : 200),
               child: FloatingActionButton.extended(
+                heroTag: 'fab_recenter_driver',
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
                 elevation: 4,
@@ -235,50 +312,71 @@ class _NavigationScreenBody extends StatelessWidget {
               ),
             ),
 
-          // E. Panneau d'arrivée si livreur à moins de 50 m
-          if (controller.isArrived)
+          // E. Tournée complétée à 100%
+          if (controller.isDelivered &&
+              controller.tourOrders.isNotEmpty &&
+              controller.remainingTourOrdersCount == 0)
             Positioned(
               left: 16,
               right: 16,
               bottom: 24,
               child: SafeArea(
-                child: _ArrivalCard(
-                  order: controller.order,
-                  onCall: () => _callCustomer(context, controller.order.phone),
-                  onExternalMaps: () => _openExternalMaps(
-                    context,
-                    controller.destination,
-                    controller.order.address,
-                  ),
-                  onDelivered: () async {
-                    HapticFeedback.heavyImpact();
-                    await controller.completeDelivery();
-                    if (context.mounted) {
-                      AppSnackBar.showSuccess(context, 'Livraison terminée avec succès !');
-                      Navigator.pop(context, true);
-                    }
-                  },
+                child: _TourCompletedCard(
+                  totalOrders: controller.tourOrders.length,
+                  onClose: () => Navigator.pop(context, true),
                 ),
               ),
             )
-          // F. Panneau inférieur classique : Télémétrie et ETA
-          else
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                child: _BottomTelemetryPanel(
-                  controller: controller,
-                  onCallCustomer: () => _callCustomer(context, controller.order.phone),
-                  onExternalMaps: () => _openExternalMaps(
-                    context,
-                    controller.destination,
-                    controller.order.address,
+          // F. Panneau d'arrivée ou télémétrie classique
+          else ...[
+            // Sélecteur horizontal d'arrêts de la tournée
+            if (controller.tourOrders.length > 1)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: controller.isArrived ? 240 : 210,
+                child: SafeArea(
+                  child: _TourStopsCarousel(controller: controller),
+                ),
+              ),
+
+            if (controller.isArrived)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 24,
+                child: SafeArea(
+                  child: _ArrivalCard(
+                    order: controller.order,
+                    onCall: () => _callCustomer(context, controller.order.phone),
+                    onExternalMaps: () => _openExternalMaps(
+                      context,
+                      controller.destination,
+                      controller.order.address,
+                    ),
+                    onDelivered: () => _openDeliveryQr(context, controller),
+                  ),
+                ),
+              )
+            else
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: SafeArea(
+                  child: _BottomTelemetryPanel(
+                    controller: controller,
+                    onCallCustomer: () => _callCustomer(context, controller.order.phone),
+                    onExternalMaps: () => _openExternalMaps(
+                      context,
+                      controller.destination,
+                      controller.order.address,
+                    ),
+                    onOpenQr: () => _openDeliveryQr(context, controller),
                   ),
                 ),
               ),
-            ),
+          ],
         ],
       ),
     );
@@ -424,11 +522,13 @@ class _BottomTelemetryPanel extends StatelessWidget {
   final NavigationController controller;
   final VoidCallback onCallCustomer;
   final VoidCallback onExternalMaps;
+  final VoidCallback onOpenQr;
 
   const _BottomTelemetryPanel({
     required this.controller,
     required this.onCallCustomer,
     required this.onExternalMaps,
+    required this.onOpenQr,
   });
 
   @override
@@ -509,7 +609,7 @@ class _BottomTelemetryPanel extends StatelessWidget {
                 ),
               ],
             ),
-            const Divider(height: 18),
+            const Divider(height: 16),
             Row(
               children: [
                 const Icon(Icons.person_pin_circle_rounded, size: 18, color: Colors.black45),
@@ -527,6 +627,273 @@ class _BottomTelemetryPanel extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: onOpenQr,
+                icon: const Icon(Icons.qr_code_2_rounded, size: 20),
+                label: const Text(
+                  'Valider la livraison (QR Client)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Widget Marqueur d'arrêt de tournée ─────────────────────────────
+class _OrderStopMarker extends StatelessWidget {
+  final int stopNumber;
+  final bool isSelected;
+  final bool isDelivered;
+  final String displayNumber;
+
+  const _OrderStopMarker({
+    required this.stopNumber,
+    required this.isSelected,
+    required this.isDelivered,
+    required this.displayNumber,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = isDelivered
+        ? AppColors.success
+        : (isSelected ? const Color(0xFF2563EB) : const Color(0xFFF59E0B));
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: isSelected ? 50 : 38,
+      height: isSelected ? 50 : 38,
+      decoration: BoxDecoration(
+        color: bgColor,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white,
+          width: isSelected ? 3.5 : 2.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: bgColor.withValues(alpha: isSelected ? 0.55 : 0.35),
+            blurRadius: isSelected ? 12 : 6,
+            spreadRadius: isSelected ? 2 : 0,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Center(
+        child: isDelivered
+            ? const Icon(Icons.check_rounded, color: Colors.white, size: 20)
+            : Text(
+                '$stopNumber',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: isSelected ? 17 : 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+// ── Carrousel horizontal des arrêts de la tournée ─────────────────
+class _TourStopsCarousel extends StatelessWidget {
+  final NavigationController controller;
+
+  const _TourStopsCarousel({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final orders = controller.tourOrders;
+    if (orders.isEmpty) return const SizedBox.shrink();
+
+    return SizedBox(
+      height: 48,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: orders.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final o = orders[index];
+          final isSelected = o.id == controller.order.id;
+          final isDelivered = o.isDelivered;
+
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                controller.selectOrder(o);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF2563EB)
+                      : (isDelivered
+                          ? AppColors.success.withValues(alpha: 0.15)
+                          : Colors.white),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                  border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFF2563EB)
+                        : (isDelivered ? AppColors.success : AppColors.border),
+                    width: isSelected ? 2 : 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 22,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.25)
+                            : (isDelivered
+                                ? AppColors.success
+                                : const Color(0xFFF59E0B)),
+                      ),
+                      alignment: Alignment.center,
+                      child: isDelivered
+                          ? const Icon(Icons.check_rounded,
+                              color: Colors.white, size: 14)
+                          : Text(
+                              '${index + 1}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      o.customerName.isNotEmpty
+                          ? o.customerName
+                          : 'Arrêt #${index + 1}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight:
+                            isSelected ? FontWeight.w800 : FontWeight.w600,
+                        color: isSelected
+                            ? Colors.white
+                            : (isDelivered
+                                ? AppColors.success
+                                : Colors.black87),
+                      ),
+                    ),
+                    if (isSelected) ...[
+                      const SizedBox(width: 6),
+                      const Icon(Icons.navigation_rounded,
+                          color: Colors.white, size: 14),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ── Carte de célébration fin de tournée ───────────────────────────
+class _TourCompletedCard extends StatelessWidget {
+  final int totalOrders;
+  final VoidCallback onClose;
+
+  const _TourCompletedCard({
+    required this.totalOrders,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 14,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.task_alt_rounded,
+                color: AppColors.success,
+                size: 46,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Tournée 100% Terminée !',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+                color: AppColors.text,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Les $totalOrders commandes de votre tournée ont toutes été validées et livrées avec succès.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13.5, color: AppColors.mutedText),
+            ),
+            const SizedBox(height: 18),
+            ElevatedButton.icon(
+              onPressed: onClose,
+              icon: const Icon(Icons.dashboard_rounded),
+              label: const Text(
+                'Retourner au tableau de bord',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+              ),
             ),
           ],
         ),

@@ -9,6 +9,7 @@ import 'navigation_screen.dart';
 import '../services/working_hours_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/delivery_qr_dialog.dart';
 import '../widgets/order_status_badge.dart';
 
 class OrderDetailsScreen extends StatefulWidget {
@@ -50,19 +51,18 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   Future<void> _advanceStatus() async {
     HapticFeedback.lightImpact();
-    try {
-      await widget.orderService.marquerLivree(widget.order);
-    } catch (error) {
-      if (mounted) {
-        AppSnackBar.showError(context, '$error');
-      }
-      return;
-    }
 
-    // Synchronisation du suivi GPS temps réel
-    DelivererLocationService().updateCurrentOrder(null);
+    // Confirmation de livraison par scan QR client
+    final success = await DeliveryQrDialog.show(
+      context: context,
+      order: widget.order,
+      orderService: widget.orderService,
+    );
 
-    if (mounted) {
+    if (success == true && mounted) {
+      // Synchronisation du suivi GPS temps réel
+      DelivererLocationService().updateCurrentOrder(null);
+
       setState(() {});
       AppSnackBar.showSuccess(
         context,
@@ -423,7 +423,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Commande #${order.id}',
+          'Commande #${order.displayNumber.isNotEmpty ? order.displayNumber : order.id}',
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         centerTitle: true,
@@ -808,7 +808,7 @@ class _StatusBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Commande #${order.id}',
+                  'Commande #${order.displayNumber.isNotEmpty ? order.displayNumber : order.id}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(

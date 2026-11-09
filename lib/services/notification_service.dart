@@ -183,7 +183,7 @@ class NotificationService {
   }) async {
     try {
       await _localNotifications.show(
-        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        id: DateTime.now().millisecondsSinceEpoch.remainder(1000000000),
         title: title,
         body: body,
         notificationDetails: NotificationDetails(

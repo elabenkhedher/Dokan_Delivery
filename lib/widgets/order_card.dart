@@ -59,7 +59,7 @@ class OrderCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        'Commande #${order.id}',
+                        'Commande #${order.displayNumber.isNotEmpty ? order.displayNumber : order.id}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(

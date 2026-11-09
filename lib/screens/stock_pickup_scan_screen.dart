@@ -156,18 +156,13 @@ class _StockPickupScanScreenState extends State<StockPickupScanScreen>
         await StockPickupSuccessDialog.show(
           context: context,
           pickup: finalPickup,
-          onStartTour: () {
-            if (widget.onPickupCompleted != null) {
-              widget.onPickupCompleted!(finalPickup!);
-            } else {
-              Navigator.of(context).pop(finalPickup);
-            }
-          },
+          onStartTour: () {},
         );
 
         if (mounted && Navigator.of(context).canPop()) {
           Navigator.of(context).pop(finalPickup);
         }
+        widget.onPickupCompleted?.call(finalPickup);
       } else {
         // Erreur de validation
         HapticFeedback.heavyImpact();

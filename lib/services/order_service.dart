@@ -113,18 +113,41 @@ class OrderService {
 
     final totalCount = orderList.length;
 
+    final now = DateTime.now();
+
+    DateTime? getOrderDate(DeliveryOrder o) =>
+        o.deliveredAt ?? o.inProgressAt ?? o.pickedUpAt ?? o.assignedAt;
+
+    double rev(List<DeliveryOrder> list) =>
+        list.where((o) => o.isDelivered).fold(0.0, (s, o) => s + o.total);
+    int deliv(List<DeliveryOrder> list) =>
+        list.where((o) => o.isDelivered).length;
+
     switch (period) {
       case DashboardPeriod.today:
         // Répartition par créneaux horaires
-        final p09 = orderList.where((o) => o.id == '1002').toList();
-        final p11 = orderList.where((o) => o.id == '1001').toList();
-        final p13 = orderList.where((o) => o.id == '1003').toList();
-        final p15 = orderList.where((o) => o.id == '1004').toList();
+        final currentHour = now.hour;
+        final p09 = <DeliveryOrder>[];
+        final p11 = <DeliveryOrder>[];
+        final p13 = <DeliveryOrder>[];
+        final p15 = <DeliveryOrder>[];
+        final p17 = <DeliveryOrder>[];
 
-        double rev(List<DeliveryOrder> list) =>
-            list.fold(0.0, (s, o) => s + o.total);
-        int deliv(List<DeliveryOrder> list) =>
-            list.where((o) => o.isDelivered).length;
+        for (final o in orderList) {
+          final dt = getOrderDate(o);
+          final h = dt?.hour ?? currentHour;
+          if (h < 11) {
+            p09.add(o);
+          } else if (h < 13) {
+            p11.add(o);
+          } else if (h < 15) {
+            p13.add(o);
+          } else if (h < 17) {
+            p15.add(o);
+          } else {
+            p17.add(o);
+          }
+        }
 
         final points = [
           ChartPoint(
@@ -133,6 +156,7 @@ class OrderService {
             orderCount: p09.length.toDouble(),
             revenue: rev(p09),
             deliveredCount: deliv(p09),
+            isCurrent: currentHour < 11,
           ),
           ChartPoint(
             label: '11h',
@@ -140,6 +164,7 @@ class OrderService {
             orderCount: p11.length.toDouble(),
             revenue: rev(p11),
             deliveredCount: deliv(p11),
+            isCurrent: currentHour >= 11 && currentHour < 13,
           ),
           ChartPoint(
             label: '13h',
@@ -147,7 +172,7 @@ class OrderService {
             orderCount: p13.length.toDouble(),
             revenue: rev(p13),
             deliveredCount: deliv(p13),
-            isCurrent: true,
+            isCurrent: currentHour >= 13 && currentHour < 15,
           ),
           ChartPoint(
             label: '15h',
@@ -155,13 +180,15 @@ class OrderService {
             orderCount: p15.length.toDouble(),
             revenue: rev(p15),
             deliveredCount: deliv(p15),
+            isCurrent: currentHour >= 15 && currentHour < 17,
           ),
-          const ChartPoint(
+          ChartPoint(
             label: '17h',
             fullLabel: 'Soirée (17h - 19h)',
-            orderCount: 0,
-            revenue: 0,
-            deliveredCount: 0,
+            orderCount: p17.length.toDouble(),
+            revenue: rev(p17),
+            deliveredCount: deliv(p17),
+            isCurrent: currentHour >= 17,
           ),
         ];
 
@@ -180,58 +207,40 @@ class OrderService {
         );
 
       case DashboardPeriod.week:
-        final points = [
-          const ChartPoint(
-            label: 'Lun',
-            fullLabel: 'Lundi',
-            orderCount: 5,
-            revenue: 158.0,
-            deliveredCount: 5,
-          ),
-          ChartPoint(
-            label: 'Mar',
-            fullLabel: 'Mardi (Aujourd\'hui)',
-            orderCount: totalCount.toDouble(),
-            revenue: curRevenue,
-            deliveredCount: curDelivered,
-            isCurrent: true,
-          ),
-          const ChartPoint(
-            label: 'Mer',
-            fullLabel: 'Mercredi',
-            orderCount: 6,
-            revenue: 192.5,
-            deliveredCount: 6,
-          ),
-          const ChartPoint(
-            label: 'Jeu',
-            fullLabel: 'Jeudi',
-            orderCount: 4,
-            revenue: 135.0,
-            deliveredCount: 4,
-          ),
-          const ChartPoint(
-            label: 'Ven',
-            fullLabel: 'Vendredi',
-            orderCount: 7,
-            revenue: 245.0,
-            deliveredCount: 6,
-          ),
-          const ChartPoint(
-            label: 'Sam',
-            fullLabel: 'Samedi',
-            orderCount: 8,
-            revenue: 280.0,
-            deliveredCount: 7,
-          ),
-          const ChartPoint(
-            label: 'Dim',
-            fullLabel: 'Dimanche',
-            orderCount: 3,
-            revenue: 95.0,
-            deliveredCount: 3,
-          ),
+        const dayNames = [
+          ('Lun', 'Lundi'),
+          ('Mar', 'Mardi'),
+          ('Mer', 'Mercredi'),
+          ('Jeu', 'Jeudi'),
+          ('Ven', 'Vendredi'),
+          ('Sam', 'Samedi'),
+          ('Dim', 'Dimanche'),
         ];
+        final todayWeekday = now.weekday; // 1 = Lundi ... 7 = Dimanche
+
+        final points = <ChartPoint>[];
+        for (int i = 1; i <= 7; i++) {
+          final isToday = i == todayWeekday;
+          final (shortName, fullName) = dayNames[i - 1];
+          final dayOrders = orderList.where((o) {
+            final dt = getOrderDate(o);
+            if (dt != null) {
+              return dt.weekday == i;
+            }
+            return isToday;
+          }).toList();
+
+          points.add(
+            ChartPoint(
+              label: shortName,
+              fullLabel: isToday ? '$fullName (Aujourd\'hui)' : fullName,
+              orderCount: dayOrders.length.toDouble(),
+              revenue: rev(dayOrders),
+              deliveredCount: deliv(dayOrders),
+              isCurrent: isToday,
+            ),
+          );
+        }
 
         final totalW = points.fold<int>(0, (s, p) => s + p.orderCount.toInt());
         final delW = points.fold<int>(0, (s, p) => s + p.deliveredCount);
@@ -239,50 +248,50 @@ class OrderService {
 
         return PeriodStats(
           period: period,
-          totalOrders: totalW,
-          deliveredOrders: delW,
+          totalOrders: totalW > 0 ? totalW : totalCount,
+          deliveredOrders: delW > 0 ? delW : curDelivered,
           inProgressOrders: curInProgress,
           awaitingPickupOrders: curAwaiting,
-          refusedOrders: curRefused + 1,
-          totalRevenue: revW,
-          successRate: (delW / (totalW == 0 ? 1 : totalW)) * 100,
+          refusedOrders: curRefused,
+          totalRevenue: revW > 0 ? revW : curRevenue,
+          successRate: totalW > 0 ? (delW / totalW) * 100 : successRate,
           trendLabel: '+14% vs sem. passée',
           isPositiveTrend: true,
           chartPoints: points,
         );
 
       case DashboardPeriod.month:
-        final points = [
-          const ChartPoint(
-            label: 'Sem 1',
-            fullLabel: 'Semaine 1 (1 - 7)',
-            orderCount: 32,
-            revenue: 1080.0,
-            deliveredCount: 30,
-          ),
-          const ChartPoint(
-            label: 'Sem 2',
-            fullLabel: 'Semaine 2 (8 - 14)',
-            orderCount: 29,
-            revenue: 975.0,
-            deliveredCount: 28,
-          ),
-          ChartPoint(
-            label: 'Sem 3',
-            fullLabel: 'Semaine 3 (En cours)',
-            orderCount: 24 + totalCount.toDouble(),
-            revenue: 780.0 + curRevenue,
-            deliveredCount: 22 + curDelivered,
-            isCurrent: true,
-          ),
-          const ChartPoint(
-            label: 'Sem 4',
-            fullLabel: 'Semaine 4 (22 - 30)',
-            orderCount: 26,
-            revenue: 890.0,
-            deliveredCount: 25,
-          ),
-        ];
+        final currentWeek = ((now.day - 1) ~/ 7) + 1;
+        final points = <ChartPoint>[];
+        for (int w = 1; w <= 4; w++) {
+          final isCurWeek = w == currentWeek.clamp(1, 4);
+          final weekOrders = orderList.where((o) {
+            final dt = getOrderDate(o);
+            if (dt != null) {
+              final ow = ((dt.day - 1) ~/ 7) + 1;
+              return ow.clamp(1, 4) == w;
+            }
+            return isCurWeek;
+          }).toList();
+
+          const weekLabels = [
+            'Semaine 1 (1 - 7)',
+            'Semaine 2 (8 - 14)',
+            'Semaine 3 (15 - 21)',
+            'Semaine 4 (22 - fin)',
+          ];
+
+          points.add(
+            ChartPoint(
+              label: 'Sem $w',
+              fullLabel: isCurWeek ? '${weekLabels[w - 1]} (En cours)' : weekLabels[w - 1],
+              orderCount: weekOrders.length.toDouble(),
+              revenue: rev(weekOrders),
+              deliveredCount: deliv(weekOrders),
+              isCurrent: isCurWeek,
+            ),
+          );
+        }
 
         final totalM = points.fold<int>(0, (s, p) => s + p.orderCount.toInt());
         final delM = points.fold<int>(0, (s, p) => s + p.deliveredCount);
@@ -290,64 +299,55 @@ class OrderService {
 
         return PeriodStats(
           period: period,
-          totalOrders: totalM,
-          deliveredOrders: delM,
+          totalOrders: totalM > 0 ? totalM : totalCount,
+          deliveredOrders: delM > 0 ? delM : curDelivered,
           inProgressOrders: curInProgress,
           awaitingPickupOrders: curAwaiting,
-          refusedOrders: curRefused + 3,
-          totalRevenue: revM,
-          successRate: (delM / (totalM == 0 ? 1 : totalM)) * 100,
+          refusedOrders: curRefused,
+          totalRevenue: revM > 0 ? revM : curRevenue,
+          successRate: totalM > 0 ? (delM / totalM) * 100 : successRate,
           trendLabel: '+22% vs mois dernier',
           isPositiveTrend: true,
           chartPoints: points,
         );
 
       case DashboardPeriod.all:
-        final points = [
-          const ChartPoint(
-            label: 'Nov',
-            fullLabel: 'Novembre',
-            orderCount: 120,
-            revenue: 4100.0,
-            deliveredCount: 115,
-          ),
-          const ChartPoint(
-            label: 'Déc',
-            fullLabel: 'Décembre',
-            orderCount: 145,
-            revenue: 5050.0,
-            deliveredCount: 139,
-          ),
-          const ChartPoint(
-            label: 'Jan',
-            fullLabel: 'Janvier',
-            orderCount: 130,
-            revenue: 4600.0,
-            deliveredCount: 124,
-          ),
-          const ChartPoint(
-            label: 'Fév',
-            fullLabel: 'Février',
-            orderCount: 138,
-            revenue: 4850.0,
-            deliveredCount: 132,
-          ),
-          const ChartPoint(
-            label: 'Mar',
-            fullLabel: 'Mars',
-            orderCount: 152,
-            revenue: 5320.0,
-            deliveredCount: 146,
-          ),
-          ChartPoint(
-            label: 'Avr',
-            fullLabel: 'Avril (En cours)',
-            orderCount: 110 + totalCount.toDouble(),
-            revenue: 3700.0 + curRevenue,
-            deliveredCount: 104 + curDelivered,
-            isCurrent: true,
-          ),
+        const monthNames = [
+          'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin',
+          'Juil', 'Août', 'Sept', 'Oct', 'Nov', 'Déc'
         ];
+        const monthFullNames = [
+          'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+          'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+        ];
+
+        final points = <ChartPoint>[];
+        for (int mOffset = 5; mOffset >= 0; mOffset--) {
+          final targetDate = DateTime(now.year, now.month - mOffset, 1);
+          final mIndex = targetDate.month - 1;
+          final isCurMonth = mOffset == 0;
+
+          final monthOrders = orderList.where((o) {
+            final dt = getOrderDate(o);
+            if (dt != null) {
+              return dt.year == targetDate.year && dt.month == targetDate.month;
+            }
+            return isCurMonth;
+          }).toList();
+
+          points.add(
+            ChartPoint(
+              label: monthNames[mIndex],
+              fullLabel: isCurMonth
+                  ? '${monthFullNames[mIndex]} (En cours)'
+                  : monthFullNames[mIndex],
+              orderCount: monthOrders.length.toDouble(),
+              revenue: rev(monthOrders),
+              deliveredCount: deliv(monthOrders),
+              isCurrent: isCurMonth,
+            ),
+          );
+        }
 
         final totalA = points.fold<int>(0, (s, p) => s + p.orderCount.toInt());
         final delA = points.fold<int>(0, (s, p) => s + p.deliveredCount);
@@ -355,13 +355,13 @@ class OrderService {
 
         return PeriodStats(
           period: period,
-          totalOrders: totalA,
-          deliveredOrders: delA,
+          totalOrders: totalA > 0 ? totalA : totalCount,
+          deliveredOrders: delA > 0 ? delA : curDelivered,
           inProgressOrders: curInProgress,
           awaitingPickupOrders: curAwaiting,
-          refusedOrders: curRefused + 14,
-          totalRevenue: revA,
-          successRate: (delA / (totalA == 0 ? 1 : totalA)) * 100,
+          refusedOrders: curRefused,
+          totalRevenue: revA > 0 ? revA : curRevenue,
+          successRate: totalA > 0 ? (delA / totalA) * 100 : successRate,
           trendLabel: '+28% progression globale',
           isPositiveTrend: true,
           chartPoints: points,
@@ -402,7 +402,9 @@ class OrderService {
   /// Marque une commande comme livrée (statut officiel Dokan 'livre')
   Future<void> marquerLivree(DeliveryOrder order) async {
     _ensureOrderExists(order);
-    order.markAsDelivered();
+    if (!order.isDelivered) {
+      order.markAsDelivered();
+    }
     _streamController.add(List.unmodifiable(_orders));
     final updateData = {
       'status': 'livre',
@@ -418,7 +420,10 @@ class OrderService {
       ]),
     };
     try {
-      await _firestore?.collection('orders').doc(order.id).update(updateData);
+      await _firestore?.collection('orders').doc(order.id).set(
+        updateData,
+        SetOptions(merge: true),
+      );
     } catch (_) {}
     try {
       await _firestore?.collection('commandes').doc(order.id).set(
@@ -449,7 +454,10 @@ class OrderService {
       ]),
     };
     try {
-      await _firestore?.collection('orders').doc(order.id).update(updateData);
+      await _firestore?.collection('orders').doc(order.id).set(
+        updateData,
+        SetOptions(merge: true),
+      );
     } catch (_) {}
     try {
       await _firestore?.collection('commandes').doc(order.id).set(

@@ -36,6 +36,7 @@ class HomeScreen extends StatefulWidget {
   final void Function(DeliveryOrder)? onOrderTap;
   final VoidCallback? onViewAllOrders;
   final void Function(StockPickup)? onPickupCompleted;
+  final VoidCallback? onStartTour;
   final Future<void> Function()? onRefresh;
   final bool isEmbedded;
 
@@ -51,6 +52,7 @@ class HomeScreen extends StatefulWidget {
     this.onOrderTap,
     this.onViewAllOrders,
     this.onPickupCompleted,
+    this.onStartTour,
     this.onRefresh,
     this.isEmbedded = false,
   });
@@ -141,6 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final pendingStockCount = allOrders
         .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
         .length;
+    final activeTourOrdersCount = allOrders
+        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+        .length;
 
     final filteredOrders = switch (_selectedFilter) {
       'En cours' => allOrders
@@ -229,9 +234,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Bonjour, Livreur !',
-                        style: TextStyle(
+                      Text(
+                        'Bonjour${effectiveProfile != null && effectiveProfile.name.trim().isNotEmpty ? ', ${effectiveProfile.name.trim()}' : ', Livreur'} !',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 19,
                           fontWeight: FontWeight.w800,
@@ -296,6 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
           // ── Bannière Enlèvement Stock & Départ Tournée ───────
           StockPickupBanner(
             pendingOrdersCount: pendingStockCount,
+            activeTourOrdersCount: activeTourOrdersCount,
             pickupService: widget.stockPickupService,
             delivererUid: effectiveProfile?.uid,
             onPickupCompleted: widget.onPickupCompleted ??
@@ -304,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     widget.onViewAllOrders!();
                   }
                 },
+            onStartTour: widget.onStartTour,
           ),
 
           const SizedBox(height: 18),

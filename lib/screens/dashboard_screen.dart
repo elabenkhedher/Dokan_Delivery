@@ -173,18 +173,16 @@ class _DashboardScreenState extends State<DashboardScreen>
       'Tournée validée ! ${pickup.effectiveOrderCount} colis enlevés au stock.',
     );
 
-    // Si une commande en cours a des coordonnées GPS valides, proposer ou lancer la navigation
+    // Démarrage de la tournée avec tous les colis sur la carte interactive
     final activeOrders = liveOrders
-        .where((o) => o.isInProgress || pickup.orderIds.contains(o.id))
+        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
         .toList();
     if (activeOrders.isNotEmpty && mounted) {
-      final firstOrder = activeOrders.first;
       Navigator.push(
         context,
         SlideFadePageRoute(
           page: NavigationScreen(
-            order: firstOrder,
-            destination: firstOrder.destinationLatLng,
+            tourOrders: activeOrders,
             vehicleInfo: DelivererLocationService.formatVehicleInfo(
               plate: pickup.vehiclePlate,
               type: pickup.vehicleType,
@@ -193,6 +191,36 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
       );
     }
+  }
+
+  void _startTour(List<DeliveryOrder> liveOrders, [DriverProfile? profile]) {
+    final activeOrders = liveOrders
+        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+        .toList();
+
+    if (activeOrders.isEmpty) {
+      AppSnackBar.showError(
+        context,
+        'Aucune commande active à livrer pour démarrer la tournée.',
+      );
+      return;
+    }
+
+    HapticFeedback.heavyImpact();
+    Navigator.push(
+      context,
+      SlideFadePageRoute(
+        page: NavigationScreen(
+          tourOrders: activeOrders,
+          vehicleInfo: profile?.hasAssignedVehicle == true
+              ? DelivererLocationService.formatVehicleInfo(
+                  plate: profile!.assignedVehiclePlate,
+                  type: profile.assignedVehicleType,
+                )
+              : null,
+        ),
+      ),
+    );
   }
 
   Future<void> _openStockScanner(
@@ -205,8 +233,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       SlideFadePageRoute(
         page: StockPickupScanScreen(
           delivererUid: profile?.uid,
-          onPickupCompleted: (pickup) =>
-              _handlePickupCompleted(pickup, liveOrders),
         ),
       ),
     );
@@ -255,6 +281,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 onViewAllOrders: () => setState(() => _selectedIndex = 1),
                 onPickupCompleted: (pickup) =>
                     _handlePickupCompleted(pickup, liveOrders),
+                onStartTour: () => _startTour(liveOrders, driverProfile),
                 isEmbedded: true,
               ),
               OrdersScreen(
@@ -265,6 +292,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 onOrderTap: _openOrder,
                 onPickupCompleted: (pickup) =>
                     _handlePickupCompleted(pickup, liveOrders),
+                onStartTour: () => _startTour(liveOrders, driverProfile),
                 isEmbedded: true,
               ),
               HistoryScreen(
@@ -314,6 +342,19 @@ class _DashboardScreenState extends State<DashboardScreen>
         ),
         automaticallyImplyLeading: false,
         actions: [
+          Builder(
+            builder: (context) {
+              final activeCount = liveOrders
+                  .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+                  .length;
+              if (activeCount == 0) return const SizedBox.shrink();
+              return IconButton(
+                tooltip: 'Démarrer la tournée (Carte)',
+                icon: const Icon(Icons.navigation_rounded),
+                onPressed: () => _startTour(liveOrders, driverProfile),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Scanner Bon de Stock',
             icon: const Icon(Icons.qr_code_scanner_rounded),

@@ -208,7 +208,7 @@ class DeliveryOrder {
 
   String get status => _status;
 
-  bool get isAssigned => false;
+  bool get isAssigned => !isPickedUp && !isDelivered && !isFailedOrRefused;
 
   bool get isInProgress => !isDelivered && !isFailedOrRefused;
 
@@ -480,8 +480,11 @@ class DeliveryOrder {
 
   /// La commande est livrée avec succès
   void markAsDelivered() {
-    if (_status != inProgress && _status != 'En cours de livraison') {
-      throw StateError('La commande doit être en cours pour être marquée comme livrée.');
+    if (isDelivered) {
+      throw StateError('Cette commande est déjà marquée comme livrée.');
+    }
+    if (isFailedOrRefused) {
+      throw StateError('Une commande en échec ou annulée ne peut pas être marquée comme livrée.');
     }
     _status = delivered;
     deliveredAt = DateTime.now();
@@ -489,8 +492,11 @@ class DeliveryOrder {
 
   /// Gestion de l'échec de livraison
   void markAsFailed([String? reason]) {
-    if (_status != inProgress && _status != 'En cours de livraison') {
-      throw StateError('Un échec ne peut être déclaré que pour une commande en cours de livraison.');
+    if (isDelivered) {
+      throw StateError('Une commande déjà livrée ne peut plus être déclarée en échec.');
+    }
+    if (isFailedOrRefused) {
+      throw StateError('Cette commande est déjà déclarée en échec.');
     }
     _status = deliveryFailed;
     failedAt = DateTime.now();

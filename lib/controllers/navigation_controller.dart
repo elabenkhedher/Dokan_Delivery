@@ -34,6 +34,7 @@ class NavigationController extends ChangeNotifier {
   // ── Propriétés d'état ──────────────────────────────────────────
   late DeliveryOrder order;
   late LatLng destination;
+  List<DeliveryOrder> _tourOrders = [];
   Map<String, dynamic>? vehicleInfo;
 
   DelivererLocation? _currentLocation;
@@ -56,6 +57,7 @@ class NavigationController extends ChangeNotifier {
   StreamSubscription<DelivererLocation>? _locationSub;
 
   // ── Getters ────────────────────────────────────────────────────
+  OrderService get orderService => _orderService;
   DelivererLocation? get currentLocation => _currentLocation;
   RouteInfo? get routeInfo => _routeInfo;
   NavStep? get currentStep => _currentStep;
@@ -67,6 +69,11 @@ class NavigationController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   DelivererLocationPermissionStatus get permissionStatus => _permissionStatus;
 
+  List<DeliveryOrder> get tourOrders => List.unmodifiable(_tourOrders);
+  int get currentOrderIndex => _tourOrders.indexWhere((o) => o.id == order.id);
+  int get remainingTourOrdersCount =>
+      _tourOrders.where((o) => !o.isDelivered).length;
+
   double get distanceToClient => _currentLocation != null
       ? _currentLocation!.distanceTo(destination)
       : 0.0;
@@ -75,14 +82,36 @@ class NavigationController extends ChangeNotifier {
 
   // ── Initialisation ─────────────────────────────────────────────
   Future<void> initialize({
-    required DeliveryOrder deliveryOrder,
-    required LatLng clientDestination,
+    DeliveryOrder? deliveryOrder,
+    LatLng? clientDestination,
+    List<DeliveryOrder>? tourOrders,
     Map<String, dynamic>? assignedVehicle,
   }) async {
-    order = deliveryOrder;
-    destination = clientDestination;
+    if (tourOrders != null && tourOrders.isNotEmpty) {
+      _tourOrders = List.from(tourOrders);
+    } else if (deliveryOrder != null) {
+      _tourOrders = [deliveryOrder];
+    }
+
+    final targetOrder = deliveryOrder ??
+        _tourOrders.firstWhere(
+          (o) => !o.isDelivered,
+          orElse: () => _tourOrders.isNotEmpty
+              ? _tourOrders.first
+              : DeliveryOrder(
+                  id: 'tour_target',
+                  customerName: 'Client',
+                  address: 'Tunis',
+                  phone: '',
+                  total: 0,
+                  status: DeliveryOrder.inProgress,
+                ),
+        );
+
+    order = targetOrder;
+    destination = clientDestination ?? targetOrder.destinationLatLng;
     vehicleInfo = assignedVehicle ?? DelivererLocationService().vehicleInfo;
-    DelivererLocationService().updateCurrentOrder(deliveryOrder.id);
+    DelivererLocationService().updateCurrentOrder(targetOrder.id);
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
@@ -217,7 +246,8 @@ class NavigationController extends ChangeNotifier {
       }
     }
 
-    _currentStep = nextStep ?? _routeInfo!.steps.last;
+    _currentStep =
+        nextStep ?? (_routeInfo!.steps.isNotEmpty ? _routeInfo!.steps.last : null);
 
     _routeInfo = _routeInfo!.copyWith(
       points: points,
@@ -271,33 +301,115 @@ class NavigationController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sélectionne une commande de la tournée et recalcule l'itinéraire vers elle
+  Future<void> selectOrder(DeliveryOrder selected) async {
+    if (order.id == selected.id && _routeInfo != null) {
+      if (_currentLocation != null) {
+        _animateCameraToDriver(_currentLocation!);
+      }
+      return;
+    }
+
+    order = selected;
+    destination = selected.destinationLatLng;
+    _isArrived = false;
+    _isDelivered = selected.isDelivered;
+    _routeInfo = null;
+    _currentStep = null;
+    _isTrackingCamera = true;
+    _isRecalculating = true;
+    DelivererLocationService().updateCurrentOrder(selected.id);
+    notifyListeners();
+
+    if (_currentLocation != null) {
+      await _calculateFullRoute(_currentLocation!.latLng, destination);
+      _animateCameraToDriver(_currentLocation!);
+    }
+    _isRecalculating = false;
+    notifyListeners();
+  }
+
+  /// Ajuste le zoom et le cadre de la carte pour afficher l'ensemble des arrêts de la tournée
+  void fitAllStops() {
+    final points = <LatLng>[];
+    if (_currentLocation != null) points.add(_currentLocation!.latLng);
+    for (final o in _tourOrders) {
+      points.add(o.destinationLatLng);
+    }
+    if (points.isEmpty) return;
+
+    _isTrackingCamera = false;
+    notifyListeners();
+
+    if (points.length == 1) {
+      mapController.move(points.first, 15.0);
+      return;
+    }
+
+    try {
+      final bounds = LatLngBounds.fromPoints(points);
+      mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.only(
+            left: 48,
+            right: 48,
+            top: 140,
+            bottom: 240,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[NavigationController] Warning fitAllStops: $e');
+    }
+  }
+
   // ── Cycle de livraison ─────────────────────────────────────────
   Future<void> completeDelivery() async {
     try {
-      _orderService.advanceStatus(order);
-    } catch (_) {}
+      await _orderService.marquerLivree(order);
+    } catch (_) {
+      try {
+        _orderService.advanceStatus(order);
+      } catch (_) {}
+    }
 
-    DelivererLocationService().updateCurrentOrder(null);
+    // Met à jour la commande livrée dans la liste de tournée
+    final idx = _tourOrders.indexWhere((o) => o.id == order.id);
+    if (idx != -1) {
+      if (!_tourOrders[idx].isDelivered) {
+        _tourOrders[idx].markAsDelivered();
+      }
+    }
 
-    await _locationPublisher.publishLocation(
-      location: _currentLocation ??
-          DelivererLocation(
-            latitude: destination.latitude,
-            longitude: destination.longitude,
-            heading: 0,
-            speed: 0,
-            timestamp: DateTime.now(),
-          ),
-      currentOrderId: null,
-      vehicleInfo: vehicleInfo,
-    );
+    // Vérifie s'il reste d'autres commandes à livrer dans la tournée
+    final remaining = _tourOrders.where((o) => !o.isDelivered).toList();
+    if (remaining.isNotEmpty) {
+      // Passer automatiquement à la commande suivante
+      await selectOrder(remaining.first);
+    } else {
+      DelivererLocationService().updateCurrentOrder(null);
 
-    await _locationSub?.cancel();
-    _locationSub = null;
-    await _locationService.stopLocationStream();
+      await _locationPublisher.publishLocation(
+        location: _currentLocation ??
+            DelivererLocation(
+              latitude: destination.latitude,
+              longitude: destination.longitude,
+              heading: 0,
+              speed: 0,
+              timestamp: DateTime.now(),
+            ),
+        currentOrderId: null,
+        vehicleInfo: vehicleInfo,
+      );
 
-    _isDelivered = true;
-    notifyListeners();
+      await _locationSub?.cancel();
+      _locationSub = null;
+      await _locationService.stopLocationStream();
+
+      _isDelivered = true;
+      notifyListeners();
+    }
   }
 
   @override

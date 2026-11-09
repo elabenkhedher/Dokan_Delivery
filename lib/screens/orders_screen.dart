@@ -25,6 +25,7 @@ class OrdersScreen extends StatefulWidget {
   final String? initialFilter;
   final void Function(DeliveryOrder)? onOrderTap;
   final void Function(StockPickup)? onPickupCompleted;
+  final VoidCallback? onStartTour;
   final Future<void> Function()? onRefresh;
   final bool isEmbedded;
 
@@ -38,6 +39,7 @@ class OrdersScreen extends StatefulWidget {
     this.initialFilter,
     this.onOrderTap,
     this.onPickupCompleted,
+    this.onStartTour,
     this.onRefresh,
     this.isEmbedded = false,
   });
@@ -180,17 +182,22 @@ class _OrdersScreenState extends State<OrdersScreen> {
           ),
           const SizedBox(height: 18),
 
-          // ── Bannière Enlèvement Stock (si des colis attendent ou sur tournée active) ──
+          // ── Bannière Enlèvement Stock & Tournée active ──
           Builder(
             builder: (context) {
               final pendingStockCount = allOrders
                   .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
                   .length;
-              if (pendingStockCount > 0 || _activeFilter == 'Tournée active') {
+              final inProgressCount = allOrders
+                  .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+                  .length;
+
+              if (pendingStockCount > 0 || inProgressCount > 0 || _activeFilter == 'Tournée active') {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: StockPickupBanner(
                     pendingOrdersCount: pendingStockCount,
+                    activeTourOrdersCount: inProgressCount,
                     pickupService: widget.stockPickupService,
                     delivererUid: widget.driverProfile?.uid,
                     onPickupCompleted: (pickup) {
@@ -199,6 +206,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                         widget.onPickupCompleted!(pickup);
                       }
                     },
+                    onStartTour: widget.onStartTour,
                   ),
                 );
               }
