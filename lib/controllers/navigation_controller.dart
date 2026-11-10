@@ -130,7 +130,7 @@ class NavigationController extends ChangeNotifier {
 
     // 2. Récupération de la première position et calcul initial
     try {
-      final initialPos = await _locationService.getCurrentLocation(referenceDestination: destination);
+      final initialPos = await _locationService.getCurrentLocation();
       if (initialPos != null) {
         _currentLocation = initialPos;
         await _calculateFullRoute(initialPos.latLng, destination);

@@ -6,6 +6,7 @@ import '../screens/stock_pickup_scan_screen.dart';
 import '../services/stock_pickup_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
+import '../utils/snackbar_helper.dart';
 import 'bouncy_button.dart';
 
 /// Bannière ergonomique pour initier l'enlèvement stock au dépôt et le départ de tournée.
@@ -128,7 +129,9 @@ class StockPickupBanner extends StatelessWidget {
                               Text(
                                 isTourReadyOnly
                                     ? 'Tournée prête'
-                                    : 'Enlèvement Stock',
+                                    : (activeTourOrdersCount == 0 && pendingOrdersCount > 0
+                                        ? 'Enlèvement Stock Requis'
+                                        : 'Enlèvement Stock'),
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
@@ -176,7 +179,7 @@ class StockPickupBanner extends StatelessWidget {
                                         BorderRadius.circular(AppRadius.pill),
                                   ),
                                   child: Text(
-                                    '$pendingOrdersCount prêt${pendingOrdersCount > 1 ? 's' : ''}',
+                                    '$pendingOrdersCount à enlever',
                                     style: const TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800,
@@ -190,8 +193,10 @@ class StockPickupBanner extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             isTourReadyOnly
-                                ? 'Vos colis sont chargés. Démarrez la tournée pour afficher tous vos arrêts sur la carte interactive.'
-                                : 'Scannez le QR Code de l\'entrepôt pour charger vos colis et démarrer votre tournée.',
+                                ? 'Tous vos colis sont chargés. Démarrez la tournée pour afficher tous vos arrêts sur la carte interactive.'
+                                : (activeTourOrdersCount == 0 && pendingOrdersCount > 0
+                                    ? 'Colis assigné par l\'administrateur. Scannez le QR Code de l\'entrepôt pour charger vos colis et débloquer la tournée.'
+                                    : 'Scannez le QR Code de l\'entrepôt pour charger vos colis et démarrer votre tournée.'),
                             style: TextStyle(
                               fontSize: 12,
                               color: isDark
@@ -269,7 +274,7 @@ class StockPickupBanner extends StatelessWidget {
                       ),
                     ),
                   ],
-                ] else
+                ] else ...[
                   SizedBox(
                     width: double.infinity,
                     height: 46,
@@ -288,18 +293,20 @@ class StockPickupBanner extends StatelessWidget {
                             ),
                           ],
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.qr_code_rounded,
+                            const Icon(
+                              Icons.qr_code_scanner_rounded,
                               color: Colors.white,
                               size: 19,
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Text(
-                              'Scanner Bon de Stock',
-                              style: TextStyle(
+                              pendingOrdersCount > 0
+                                  ? 'Scanner Bon de Stock ($pendingOrdersCount)'
+                                  : 'Scanner Bon de Stock',
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w800,
@@ -311,6 +318,61 @@ class StockPickupBanner extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (pendingOrdersCount > 0) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? AppColors.darkSurfaceAlt.withValues(alpha: 0.5)
+                            : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
+                        border: Border.all(
+                          color: isDark
+                              ? AppColors.darkBorder.withValues(alpha: 0.7)
+                              : const Color(0xFFCBD5E1),
+                        ),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            AppSnackBar.showInfo(
+                              context,
+                              'Tournée inactive : scannez d\'abord le bon d\'enlèvement en entrepôt pour débloquer votre tournée.',
+                            );
+                          },
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.lock_outline_rounded,
+                                color: isDark
+                                    ? AppColors.darkMuted
+                                    : AppColors.mutedText,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Démarrer la tournée (Inactif - scannez d\'abord)',
+                                style: TextStyle(
+                                  color: isDark
+                                      ? AppColors.darkMuted
+                                      : AppColors.mutedText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ],
             ),
           ),

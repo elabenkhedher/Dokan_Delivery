@@ -52,6 +52,14 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
   Future<void> _advanceStatus() async {
     HapticFeedback.lightImpact();
 
+    if (!widget.order.isPickedUp) {
+      AppSnackBar.showError(
+        context,
+        'Impossible de livrer : ce colis n\'a pas encore été enlevé au stock. Veuillez d\'abord scanner le bon d\'enlèvement.',
+      );
+      return;
+    }
+
     // Confirmation de livraison par scan QR client
     final success = await DeliveryQrDialog.show(
       context: context,
@@ -408,6 +416,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final order = widget.order;
     final isDelivered = order.isDelivered;
     final isRefused = order.isFailedOrRefused;
@@ -511,6 +520,77 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen>
               const SizedBox(height: 16),
             ] else ...[
               const SizedBox(height: 6),
+            ],
+
+            if (order.driverRating != null && order.driverRating! > 0) ...[
+              const _SectionTitle(title: '⭐ Évaluation & Compliments client'),
+              const SizedBox(height: 10),
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  side: const BorderSide(color: Color(0xFFFCD34D), width: 1.2),
+                ),
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFFFFBEB),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Row(
+                            children: List.generate(5, (index) {
+                              return Icon(
+                                index < order.driverRating!
+                                    ? Icons.star_rounded
+                                    : Icons.star_outline_rounded,
+                                color: const Color(0xFFF59E0B),
+                                size: 24,
+                              );
+                            }),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${order.driverRating} / 5 étoiles',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14.5,
+                              color: Color(0xFFD97706),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (order.feedbackTags.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: order.feedbackTags.map((tag) {
+                            return Chip(
+                              backgroundColor: isDark
+                                  ? const Color(0xFF334155)
+                                  : const Color(0xFFFEF3C7),
+                              side: const BorderSide(color: Color(0xFFFCD34D)),
+                              label: Text(
+                                tag,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF92400E),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
 
             // ── Infos client ────────────────────────────────

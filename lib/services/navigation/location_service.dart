@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:latlong2/latlong.dart';
 import '../../models/navigation/deliverer_location.dart';
 
 /// Statuts des autorisations et du capteur de géolocalisation
@@ -49,33 +48,32 @@ class LocationService {
   Future<bool> openAppSettings() async => await Geolocator.openAppSettings();
   Future<bool> openLocationSettings() async => await Geolocator.openLocationSettings();
 
-  /// Normalise les coordonnées de l'émulateur Android par défaut (Mountain View, USA) vers la ville du client
-  Position _filterEmulatorPosition(Position pos, [LatLng? referenceDestination]) {
+  /// Si l'émulateur Android renvoie la position par défaut (Mountain View, USA),
+  /// on replie sur Tunis (Grand Tunis) par défaut si aucun GPS n'est configuré.
+  Position _filterEmulatorPosition(Position pos) {
     if ((pos.latitude - 37.42).abs() < 0.2 && (pos.longitude - (-122.08)).abs() < 0.2) {
-      final lat = referenceDestination != null ? referenceDestination.latitude - 0.007 : 36.8120;
-      final lon = referenceDestination != null ? referenceDestination.longitude - 0.005 : 10.1800;
       return Position(
-        latitude: lat,
-        longitude: lon,
+        latitude: 36.8065,
+        longitude: 10.1815,
         timestamp: pos.timestamp,
         accuracy: pos.accuracy,
         altitude: pos.altitude,
         altitudeAccuracy: pos.altitudeAccuracy,
-        heading: 45.0,
+        heading: 0.0,
         headingAccuracy: pos.headingAccuracy,
-        speed: 8.5,
+        speed: 0.0,
         speedAccuracy: pos.speedAccuracy,
       );
     }
     return pos;
   }
 
-  /// Récupère la position ponctuelle actuelle (avec secours réactif pour émulateur)
-  Future<DelivererLocation?> getCurrentLocation({LatLng? referenceDestination}) async {
+  /// Récupère la position ponctuelle actuelle (position réelle du capteur GPS)
+  Future<DelivererLocation?> getCurrentLocation() async {
     try {
       final lastKnown = await Geolocator.getLastKnownPosition();
       if (lastKnown != null) {
-        return DelivererLocation.fromPosition(_filterEmulatorPosition(lastKnown, referenceDestination));
+        return DelivererLocation.fromPosition(_filterEmulatorPosition(lastKnown));
       }
 
       final pos = await Geolocator.getCurrentPosition(
@@ -84,23 +82,14 @@ class LocationService {
           timeLimit: Duration(seconds: 4),
         ),
       );
-      return DelivererLocation.fromPosition(_filterEmulatorPosition(pos, referenceDestination));
+      return DelivererLocation.fromPosition(_filterEmulatorPosition(pos));
     } catch (e) {
-      debugPrint('[LocationService] Note: position de secours utilisée (émulateur sans GPS fixé): $e');
-      if (referenceDestination != null) {
-        return DelivererLocation(
-          latitude: referenceDestination.latitude - 0.007,
-          longitude: referenceDestination.longitude - 0.005,
-          heading: 45.0,
-          speed: 8.5,
-          timestamp: DateTime.now(),
-        );
-      }
+      debugPrint('[LocationService] Note: position de secours utilisée (GPS non disponible): $e');
       return DelivererLocation(
-        latitude: 36.8120,
-        longitude: 10.1800,
-        heading: 45.0,
-        speed: 8.5,
+        latitude: 36.8065,
+        longitude: 10.1815,
+        heading: 0.0,
+        speed: 0.0,
         timestamp: DateTime.now(),
       );
     }

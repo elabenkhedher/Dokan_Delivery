@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/delivery_order.dart';
 import '../models/delivery_stats.dart';
+import '../models/driver_stats.dart';
 
 class OrderService {
   final FirebaseFirestore? _customFirestore;
@@ -537,6 +538,78 @@ class OrderService {
     }
   }
 
+  /// Écoute en temps réel les statistiques de notation et compliments du livreur
+  Stream<DriverStats> watchDriverStats([String? driverUid]) {
+    final uid = driverUid ?? _currentUser?.uid;
+    final firestore = _firestore;
+
+    if (uid != null && uid.isNotEmpty && firestore != null) {
+      try {
+        return firestore
+            .collection('orders')
+            .where('livreurId', isEqualTo: uid)
+            .where('status', isEqualTo: 'livre')
+            .snapshots()
+            .map((snapshot) {
+          int totalDelivered = snapshot.docs.length;
+          int ratedOrdersCount = 0;
+          double sumRatings = 0;
+          final complimentCounts = <String, int>{
+            DriverStats.tagPonctuel: 0,
+            DriverStats.tagCourtois: 0,
+            DriverStats.tagColisSoigne: 0,
+            DriverStats.tagProfessionnel: 0,
+          };
+
+          for (final doc in snapshot.docs) {
+            final data = doc.data();
+            final rating = data['driverRating'] ?? data['rating'];
+            if (rating is num && rating > 0) {
+              ratedOrdersCount++;
+              sumRatings += rating.toDouble();
+            }
+
+            final feedback = (data['driverFeedback'] ?? data['feedback'])?.toString();
+            if (feedback != null && feedback.isNotEmpty) {
+              final lower = feedback.toLowerCase();
+              if (lower.contains('ponctuel')) {
+                complimentCounts[DriverStats.tagPonctuel] =
+                    (complimentCounts[DriverStats.tagPonctuel] ?? 0) + 1;
+              }
+              if (lower.contains('courtois') || lower.contains('souriant')) {
+                complimentCounts[DriverStats.tagCourtois] =
+                    (complimentCounts[DriverStats.tagCourtois] ?? 0) + 1;
+              }
+              if (lower.contains('soigné') || lower.contains('soigne') || lower.contains('colis')) {
+                complimentCounts[DriverStats.tagColisSoigne] =
+                    (complimentCounts[DriverStats.tagColisSoigne] ?? 0) + 1;
+              }
+              if (lower.contains('professionnel') || lower.contains('pro')) {
+                complimentCounts[DriverStats.tagProfessionnel] =
+                    (complimentCounts[DriverStats.tagProfessionnel] ?? 0) + 1;
+              }
+            }
+          }
+
+          final average =
+              ratedOrdersCount > 0 ? (sumRatings / ratedOrdersCount) : 5.0;
+
+          return DriverStats(
+            totalDelivered: totalDelivered,
+            ratedOrdersCount: ratedOrdersCount,
+            averageRating: average,
+            compliments: complimentCounts,
+          );
+        });
+      } catch (e) {
+        debugPrint('[OrderService] watchDriverStats error: $e');
+      }
+    }
+
+    // Fallback local à partir des commandes chargées
+    return _streamController.stream.map((orders) => DriverStats.fromOrders(orders));
+  }
+
   /// Validation directe d'un scan de bon d'enlèvement (Dokan Delivery)
   Future<void> validerScanBonEnlevement(String rawScannedCode) =>
       _orderServiceValiderScanBonEnlevement(rawScannedCode);
@@ -630,6 +703,39 @@ Future<void> validerScanBonEnlevement(String rawScannedCode) async {
     } catch (e) {
       debugPrint('[validerScanBonEnlevement] Erreur update bon: $e');
     }
+  }
+
+  // Fallback direct si le code scanné est directement l'ID d'une commande ou son numéro d'affichage
+  if (orderIds.isEmpty) {
+    try {
+      final docO = await firestore.collection('orders').doc(cleanCode).get();
+      if (docO.exists) {
+        orderIds.add(cleanCode);
+      } else {
+        final docC = await firestore.collection('commandes').doc(cleanCode).get();
+        if (docC.exists) {
+          orderIds.add(cleanCode);
+        } else {
+          final q1 = await firestore
+              .collection('orders')
+              .where('displayNumber', isEqualTo: cleanCode)
+              .limit(1)
+              .get();
+          if (q1.docs.isNotEmpty) {
+            orderIds.add(q1.docs.first.id);
+          } else {
+            final q2 = await firestore
+                .collection('commandes')
+                .where('displayNumber', isEqualTo: cleanCode)
+                .limit(1)
+                .get();
+            if (q2.docs.isNotEmpty) {
+              orderIds.add(q2.docs.first.id);
+            }
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   // 2. CRUCIAL : Mettre à jour toutes les commandes au statut "enleve"

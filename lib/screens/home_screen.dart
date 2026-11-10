@@ -144,7 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
         .length;
     final activeTourOrdersCount = allOrders
-        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+        .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
         .length;
 
     final filteredOrders = switch (_selectedFilter) {

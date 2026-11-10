@@ -151,6 +151,64 @@ class OrderCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (order.driverRating != null && order.driverRating! > 0) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? const Color(0xFF78350F).withValues(alpha: 0.35)
+                          : const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(
+                        color: const Color(0xFFFCD34D),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.star_rounded,
+                          size: 14,
+                          color: Color(0xFFD97706),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${order.driverRating}/5',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: isDark
+                                ? const Color(0xFFFDE68A)
+                                : const Color(0xFF92400E),
+                          ),
+                        ),
+                        if (order.driverFeedback != null &&
+                            order.driverFeedback!.trim().isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              '• ${order.driverFeedback!}',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? const Color(0xFFFDE68A)
+                                    : const Color(0xFF92400E),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

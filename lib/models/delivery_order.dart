@@ -146,6 +146,10 @@ class DeliveryOrder {
   final bool isPickedUp;
   String? motifEchec;
 
+  // --- Notation & Compliments reçus du client ---
+  int? driverRating;
+  String? driverFeedback;
+
   String _status;
 
   // --- Horodatage pour chaque étape (exigé par le cahier des charges) ---
@@ -178,6 +182,8 @@ class DeliveryOrder {
     this.isPickedUp = false,
     required String status,
     this.motifEchec,
+    this.driverRating,
+    this.driverFeedback,
     this.assignedAt,
     this.pickedUpAt,
     this.inProgressAt,
@@ -237,6 +243,17 @@ class DeliveryOrder {
       _status == 'cancelled' ||
       _status == 'retour' ||
       _status == 'returned';
+
+  bool get hasRating => driverRating != null && driverRating! > 0;
+
+  List<String> get feedbackTags =>
+      (driverFeedback != null && driverFeedback!.trim().isNotEmpty)
+          ? driverFeedback!
+              .split(',')
+              .map((t) => t.trim())
+              .where((t) => t.isNotEmpty)
+              .toList()
+          : const [];
 
   // --- 1. Instanciation depuis Firestore (collection 'orders') ---
   factory DeliveryOrder.fromFirestore(DocumentSnapshot doc) {
@@ -400,6 +417,13 @@ class DeliveryOrder {
     final latitude = rawLat != null ? parseDouble(rawLat) : null;
     final longitude = rawLng != null ? parseDouble(rawLng) : null;
 
+    final rawRating = data['driverRating'] ?? data['rating'] ?? data['noteLivreur'] ?? data['note'];
+    final int? driverRating = (rawRating is num)
+        ? rawRating.toInt()
+        : int.tryParse(rawRating?.toString() ?? '');
+    final String? driverFeedback =
+        (data['driverFeedback'] ?? data['feedback'] ?? data['avisLivreur'] ?? data['compliments'])?.toString();
+
     return DeliveryOrder(
       id: id,
       displayNumber: displayNumber,
@@ -422,6 +446,8 @@ class DeliveryOrder {
       isPickedUp: isPickedUp,
       status: status,
       motifEchec: motifEchec,
+      driverRating: driverRating,
+      driverFeedback: driverFeedback,
       assignedAt: resolveTimestamp(data['assignedAt'], data['dateAffectation'], 'confirmed'),
       pickedUpAt: resolveTimestamp(data['pickedUpAt'], data['dateRamassage'], 'in_progress'),
       inProgressAt: resolveTimestamp(data['inProgressAt'], data['datePriseEnCharge'], 'in_progress'),
@@ -444,6 +470,9 @@ class DeliveryOrder {
       'isPickedUp': isPickedUp,
       'status': firestoreStatus,
       'motifEchec': motifEchec,
+      if (driverRating != null) 'driverRating': driverRating,
+      if (driverFeedback != null && driverFeedback!.isNotEmpty)
+        'driverFeedback': driverFeedback,
       'assignedAt': assignedAt != null ? Timestamp.fromDate(assignedAt!) : null,
       'pickedUpAt': pickedUpAt != null ? Timestamp.fromDate(pickedUpAt!) : null,
       'inProgressAt': inProgressAt != null ? Timestamp.fromDate(inProgressAt!) : null,

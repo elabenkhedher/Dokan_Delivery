@@ -173,9 +173,9 @@ class _DashboardScreenState extends State<DashboardScreen>
       'Tournée validée ! ${pickup.effectiveOrderCount} colis enlevés au stock.',
     );
 
-    // Démarrage de la tournée avec tous les colis sur la carte interactive
+    // Démarrage de la tournée avec tous les colis enlevés au stock sur la carte interactive
     final activeOrders = liveOrders
-        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+        .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
         .toList();
     if (activeOrders.isNotEmpty && mounted) {
       Navigator.push(
@@ -195,14 +195,24 @@ class _DashboardScreenState extends State<DashboardScreen>
 
   void _startTour(List<DeliveryOrder> liveOrders, [DriverProfile? profile]) {
     final activeOrders = liveOrders
-        .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+        .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
         .toList();
 
     if (activeOrders.isEmpty) {
-      AppSnackBar.showError(
-        context,
-        'Aucune commande active à livrer pour démarrer la tournée.',
-      );
+      final unpickedCount = liveOrders
+          .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
+          .length;
+      if (unpickedCount > 0) {
+        AppSnackBar.showError(
+          context,
+          'Impossible de démarrer la tournée : vous devez d\'abord scanner vos colis au stock.',
+        );
+      } else {
+        AppSnackBar.showError(
+          context,
+          'Aucune commande active à livrer pour démarrer la tournée.',
+        );
+      }
       return;
     }
 
@@ -345,7 +355,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           Builder(
             builder: (context) {
               final activeCount = liveOrders
-                  .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+                  .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
                   .length;
               if (activeCount == 0) return const SizedBox.shrink();
               return IconButton(

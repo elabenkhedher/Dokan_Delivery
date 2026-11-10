@@ -3,12 +3,14 @@ import 'package:flutter/services.dart';
 
 import '../models/delivery_order.dart';
 import '../models/driver_profile.dart';
+import '../models/driver_stats.dart';
 import '../services/auth_service.dart';
 import '../services/order_service.dart';
 import '../services/profile_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/page_transitions.dart';
 import '../widgets/assigned_vehicle_card.dart';
+import '../widgets/driver_reputation_card.dart';
 import 'auth_gate.dart';
 import 'edit_profile_screen.dart';
 
@@ -235,6 +237,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
+            ),
+            const SizedBox(height: 14),
+
+            // ── 1.B. Réputation & Compliments Clients ──────────────────
+            StreamBuilder<DriverStats>(
+              stream: _orderService.watchDriverStats(currentUser?.uid),
+              initialData: DriverStats.fromOrders(orderList),
+              builder: (context, statsSnap) {
+                final stats = statsSnap.data ?? DriverStats.fromOrders(orderList);
+                return DriverReputationCard(stats: stats);
+              },
             ),
             const SizedBox(height: 14),
 

@@ -92,12 +92,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final allOrders = widget.orders ?? _orderService.getOrders();
+    final pickedUpOrders = allOrders
+        .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
+        .toList();
     final activeOrders =
-        allOrders.where((o) => o.isInProgress || o.isAssigned).toList();
+        allOrders.where((o) => !o.isDelivered && !o.isFailedOrRefused).toList();
 
     final filteredOrders = switch (_activeFilter) {
       'Tournée active' || 'Tournée en cours' || 'En cours' || 'Actives' =>
-        activeOrders,
+        pickedUpOrders.isNotEmpty ? pickedUpOrders : activeOrders,
       'Terminées' || 'Livrées' => allOrders
           .where((o) => o.isDelivered || o.isFailedOrRefused)
           .toList(),
@@ -188,16 +191,16 @@ class _OrdersScreenState extends State<OrdersScreen> {
               final pendingStockCount = allOrders
                   .where((o) => !o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
                   .length;
-              final inProgressCount = allOrders
-                  .where((o) => !o.isDelivered && !o.isFailedOrRefused)
+              final activeTourOrdersCount = allOrders
+                  .where((o) => o.isPickedUp && !o.isDelivered && !o.isFailedOrRefused)
                   .length;
 
-              if (pendingStockCount > 0 || inProgressCount > 0 || _activeFilter == 'Tournée active') {
+              if (pendingStockCount > 0 || activeTourOrdersCount > 0 || _activeFilter == 'Tournée active') {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: StockPickupBanner(
                     pendingOrdersCount: pendingStockCount,
-                    activeTourOrdersCount: inProgressCount,
+                    activeTourOrdersCount: activeTourOrdersCount,
                     pickupService: widget.stockPickupService,
                     delivererUid: widget.driverProfile?.uid,
                     onPickupCompleted: (pickup) {

@@ -40,10 +40,26 @@ class AppSnackBar {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: Theme.of(context).colorScheme.error,
+        backgroundColor: const Color(0xFFD97706),
         content: Row(
           children: [
             const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static void showInfo(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF2563EB),
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded, color: Colors.white, size: 18),
             const SizedBox(width: 10),
             Expanded(child: Text(message)),
           ],

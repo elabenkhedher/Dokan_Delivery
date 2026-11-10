@@ -14,19 +14,22 @@ import '../utils/snackbar_helper.dart';
 class DeliveryQrDialog extends StatefulWidget {
   final DeliveryOrder order;
   final OrderService orderService;
+  final bool enableSimulation;
 
   const DeliveryQrDialog({
     super.key,
     required this.order,
     required this.orderService,
+    this.enableSimulation = false,
   });
 
   /// Affiche le dialogue modal de confirmation QR.
-  /// Renvoie `true` si la livraison a été confirmée avec succès (par scan ou simulation).
+  /// Renvoie `true` si la livraison a été confirmée avec succès par le client.
   static Future<bool?> show({
     required BuildContext context,
     required DeliveryOrder order,
     required OrderService orderService,
+    bool enableSimulation = false,
   }) {
     return showGeneralDialog<bool>(
       context: context,
@@ -48,6 +51,7 @@ class DeliveryQrDialog extends StatefulWidget {
         return DeliveryQrDialog(
           order: order,
           orderService: orderService,
+          enableSimulation: enableSimulation,
         );
       },
     );
@@ -70,6 +74,8 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
 
   bool _isSuccess = false;
   bool _isManualValidating = false;
+  int? _receivedRating;
+  String? _receivedFeedback;
 
   @override
   void initState() {
@@ -136,7 +142,7 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
     }
   }
 
-  /// Analyse les mises à jour Firestore pour détecter la validation client
+  /// Analyse les mises à jour Firestore pour détecter la validation client et les notes
   void _processSnapshot(DocumentSnapshot snapshot) {
     if (!mounted || _isSuccess) return;
     if (!snapshot.exists) return;
@@ -155,20 +161,40 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
         rawStatus == 'completed' ||
         rawStatus == 'delivered';
 
-    if (isDelivered) {
-      _triggerSuccess(clientScanned: true);
+    final rawRating = data['driverRating'] ?? data['rating'] ?? data['noteLivreur'] ?? data['note'];
+    final int? rating = (rawRating is num)
+        ? rawRating.toInt()
+        : int.tryParse(rawRating?.toString() ?? '');
+    final String? feedback =
+        (data['driverFeedback'] ?? data['feedback'] ?? data['avisLivreur'] ?? data['compliments'])?.toString();
+
+    if (isDelivered || rating != null) {
+      _triggerSuccess(
+        clientScanned: true,
+        rating: rating,
+        feedback: feedback,
+      );
     }
   }
 
-  /// Déclenche l'état de validation avec animation de succès
-  void _triggerSuccess({required bool clientScanned}) {
+  /// Déclenche l'état de validation avec animation de succès et célébration des notes
+  void _triggerSuccess({
+    required bool clientScanned,
+    int? rating,
+    String? feedback,
+  }) {
     if (_isSuccess) return;
     _isSuccess = true;
+
+    _receivedRating = rating ?? widget.order.driverRating;
+    _receivedFeedback = feedback ?? widget.order.driverFeedback;
 
     // Mise à jour de l'instance locale si nécessaire
     if (!widget.order.isDelivered) {
       widget.order.markAsDelivered();
     }
+    if (_receivedRating != null) widget.order.driverRating = _receivedRating;
+    if (_receivedFeedback != null) widget.order.driverFeedback = _receivedFeedback;
 
     HapticFeedback.heavyImpact();
 
@@ -179,13 +205,6 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
       // Arrêt des écouteurs Firestore
       _ordersSub?.cancel();
       _commandesSub?.cancel();
-
-      // Fermeture automatique après affichage du checkmark
-      Future.delayed(const Duration(milliseconds: 1400), () {
-        if (mounted) {
-          Navigator.of(context).pop(true);
-        }
-      });
     }
   }
 
@@ -198,7 +217,15 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
 
     try {
       await widget.orderService.marquerLivree(widget.order);
-      _triggerSuccess(clientScanned: false);
+      const simulatedRating = 5;
+      const simulatedFeedback = 'Ponctuel ⏱️, Courtois & Souriant 😊, Colis soigné 📦';
+      widget.order.driverRating = simulatedRating;
+      widget.order.driverFeedback = simulatedFeedback;
+      _triggerSuccess(
+        clientScanned: false,
+        rating: simulatedRating,
+        feedback: simulatedFeedback,
+      );
     } catch (error) {
       if (mounted) {
         setState(() => _isManualValidating = false);
@@ -658,66 +685,77 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
             ),
           ),
 
-          const SizedBox(height: 14),
-
-          // ── Bouton d'action : Simuler scan client (Test) / Validation ──────
-          ElevatedButton.icon(
-            key: const ValueKey('delivery-qr-simulate-btn'),
-            onPressed: _isManualValidating ? null : _handleManualValidation,
-            icon: _isManualValidating
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.bolt_rounded, size: 20),
-            label: Text(
-              _isManualValidating
-                  ? 'Validation en cours...'
-                  : 'Simuler scan client (Test)',
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
+          // ── Bouton d'action : Simuler scan client (Test) / Validation (activable uniquement en mode test) ──
+          if (widget.enableSimulation) ...[
+            const SizedBox(height: 14),
+            ElevatedButton.icon(
+              key: const ValueKey('delivery-qr-simulate-btn'),
+              onPressed: _isManualValidating ? null : _handleManualValidation,
+              icon: _isManualValidating
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.bolt_rounded, size: 20),
+              label: Text(
+                _isManualValidating
+                    ? 'Validation en cours...'
+                    : 'Simuler scan client (Test)',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                elevation: 1,
               ),
             ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: primaryColor,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 13),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              elevation: 1,
-            ),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  /// Vue de succès animée avec checkmark lors de la confirmation
+  /// Vue de célébration festive avec étoiles et compliments lors de la confirmation
   Widget _buildSuccessView(bool isDark, String displayNumber) {
-    return Container(
+    final rating = _receivedRating ?? widget.order.driverRating ?? 5;
+    final feedback = _receivedFeedback ?? widget.order.driverFeedback;
+    final tags = (feedback != null && feedback.trim().isNotEmpty)
+        ? feedback
+            .split(',')
+            .map((t) => t.trim())
+            .where((t) => t.isNotEmpty)
+            .toList()
+        : <String>[];
+
+    return SingleChildScrollView(
       key: const ValueKey('qr-validation-success-view'),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 38),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           ScaleTransition(
             scale: _successScale,
             child: Container(
-              width: 86,
-              height: 86,
+              width: 76,
+              height: 76,
               decoration: BoxDecoration(
                 color: AppColors.success,
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
                     color: AppColors.success.withValues(alpha: 0.35),
-                    blurRadius: 20,
+                    blurRadius: 18,
                     offset: const Offset(0, 6),
                   ),
                 ],
@@ -725,58 +763,141 @@ class _DeliveryQrDialogState extends State<DeliveryQrDialog>
               child: const Icon(
                 Icons.check_rounded,
                 color: Colors.white,
-                size: 52,
+                size: 46,
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
           Text(
-            'Livraison Validée !',
+            '🎉 Livraison réussie et validée !',
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 22,
+              fontSize: 20,
               fontWeight: FontWeight.w900,
               color: isDark ? AppColors.darkText : AppColors.text,
               letterSpacing: -0.3,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
-            'Le scan client a été confirmé avec succès.',
-            textAlign: TextAlign.center,
+            'Colis remis au client • Commande #$displayNumber',
             style: TextStyle(
-              fontSize: 13.5,
-              fontWeight: FontWeight.w500,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
               color: isDark ? AppColors.darkMuted : AppColors.mutedText,
             ),
           ),
           const SizedBox(height: 16),
+
+          // ── Notation par étoiles du client ──
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.successSoft,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
+              color: isDark
+                  ? const Color(0xFF1E293B)
+                  : const Color(0xFFFFFBEB), // Amber 50
+              borderRadius: BorderRadius.circular(AppRadius.md),
               border: Border.all(
-                color: AppColors.success.withValues(alpha: 0.3),
+                color: const Color(0xFFFCD34D), // Amber 300
+                width: 1.2,
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Column(
               children: [
-                const Icon(
-                  Icons.verified_rounded,
-                  size: 16,
-                  color: AppColors.success,
-                ),
-                const SizedBox(width: 6),
                 Text(
-                  'Commande #$displayNumber',
-                  style: const TextStyle(
+                  'Note attribuée par le client :',
+                  style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.success,
+                    color: isDark ? Colors.white70 : const Color(0xFF92400E),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(5, (index) {
+                    final isFilled = index < rating;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2.0),
+                      child: Icon(
+                        isFilled
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        color: const Color(0xFFF59E0B),
+                        size: 30,
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$rating / 5 étoiles',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFFD97706),
                   ),
                 ),
               ],
+            ),
+          ),
+
+          // ── Puces des compliments reçus ──
+          if (tags.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              alignment: WrapAlignment.center,
+              children: tags.map((tag) {
+                return Chip(
+                  backgroundColor: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFFFEF3C7),
+                  side: const BorderSide(color: Color(0xFFFCD34D)),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  label: Text(
+                    tag,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF92400E),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+
+          const SizedBox(height: 20),
+
+          // ── Bouton Continuer ma tournée ──
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              key: const ValueKey('continue-tour-btn'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E), // Vert Dokan
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
+                ),
+                elevation: 2,
+              ),
+              onPressed: () {
+                HapticFeedback.mediumImpact();
+                Navigator.of(context).pop(true);
+              },
+              icon: const Icon(Icons.rocket_launch_rounded, size: 20),
+              label: const Text(
+                'Continuer ma tournée 🚀',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                ),
+              ),
             ),
           ),
         ],
